@@ -1,0 +1,5 @@
+Architecture.md
+Details.md
+scripts/
+Multi-Agent/__pycache__/
+Multi-Agent/*.pyc

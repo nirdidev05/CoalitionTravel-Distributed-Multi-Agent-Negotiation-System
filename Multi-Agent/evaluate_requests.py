@@ -11,12 +11,9 @@ from math import ceil
 from pathlib import Path
 
 from coalition_travel.application.evaluation import score_extractions
+from coalition_travel.application.request_understanding import RequestExtractionError
 from coalition_travel.domain.request import TravelRequestDraft
-from coalition_travel.infrastructure.llm.ollama import (
-    LLMProviderError,
-    OllamaStructuredRequestExtractor,
-)
-from pydantic import ValidationError
+from coalition_travel.infrastructure.llm.ollama import OllamaStructuredRequestExtractor
 
 DEFAULT_DATASET = Path(__file__).resolve().parents[1] / "data/eval/request_extraction.jsonl"
 
@@ -56,7 +53,7 @@ async def evaluate(records, extractor):
             prediction = await extractor.extract(record["text"], record["reference_date"])
             predictions.append(prediction)
             successful_calls += 1
-        except (LLMProviderError, ValidationError, ValueError) as exc:
+        except RequestExtractionError as exc:
             # Continue the batch so the report identifies every failed example.
             predictions.append(None)
             errors.append({"id": record["id"], "error": type(exc).__name__})

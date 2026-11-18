@@ -5,7 +5,10 @@ from decimal import Decimal
 import pytest
 from coalition_travel.application.evaluation import score_extractions
 from coalition_travel.application.optimization import CoalitionOptimizationService
-from coalition_travel.application.request_understanding import understand_request
+from coalition_travel.application.request_understanding import (
+    ExtractorContractError,
+    understand_request,
+)
 from coalition_travel.domain.coalition_problem import CoalitionProblem
 from coalition_travel.domain.request import TravelRequestDraft
 from CoalitionStructureSearch import brute_force_search, dp_search, idp_search
@@ -91,6 +94,15 @@ def test_request_understanding_does_not_treat_provider_failure_as_user_error():
 
     with pytest.raises(RuntimeError, match="provider unavailable"):
         asyncio.run(understand_request("Tokyo", FailingExtractor(), date(2026, 1, 1)))
+
+
+def test_request_understanding_rejects_extractor_return_type_as_contract_error():
+    class WrongTypeExtractor:
+        async def extract(self, text, reference_date):
+            return {"destination": "Tokyo"}
+
+    with pytest.raises(ExtractorContractError, match="received dict"):
+        asyncio.run(understand_request("Tokyo", WrongTypeExtractor(), date(2026, 1, 1)))
 
 
 def test_request_with_all_required_fields_is_ready():

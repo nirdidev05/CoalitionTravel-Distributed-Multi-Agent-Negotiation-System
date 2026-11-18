@@ -8,10 +8,17 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+from pydantic import ValidationError
+
+from coalition_travel.application.request_understanding import (
+    RequestInputError,
+    RequestProviderError,
+    StructuredOutputError,
+)
 from coalition_travel.domain.request import TravelRequestDraft
 
 
-class LLMProviderError(RuntimeError):
+class LLMProviderError(RequestProviderError):
     """Raised when the configured LLM service cannot return a valid response."""
 
 
@@ -51,9 +58,9 @@ class OllamaStructuredRequestExtractor:
 
     async def extract(self, text: str, reference_date: date) -> TravelRequestDraft:
         if not isinstance(text, str) or not text.strip():
-            raise ValueError("request text must not be blank")
+            raise RequestInputError("request text must not be blank")
         if len(text) > self.max_input_chars:
-            raise ValueError(f"request text exceeds {self.max_input_chars} characters")
+            raise RequestInputError(f"request text exceeds {self.max_input_chars} characters")
         if not isinstance(reference_date, date) or isinstance(reference_date, datetime):
             raise TypeError("reference_date must be a date")
         return await asyncio.to_thread(self._extract_sync, text, reference_date)
@@ -109,5 +116,9 @@ class OllamaStructuredRequestExtractor:
         if not isinstance(content, str):
             raise LLMProviderError("Ollama message content must be a JSON string")
 
-        # Keep schema errors distinct from transport failures for the application layer.
-        return TravelRequestDraft.model_validate_json(content)
+        try:
+            return TravelRequestDraft.model_validate_json(content)
+        except ValidationError as exc:
+            raise StructuredOutputError(
+                "Ollama returned JSON that does not satisfy the travel request schema"
+            ) from exc

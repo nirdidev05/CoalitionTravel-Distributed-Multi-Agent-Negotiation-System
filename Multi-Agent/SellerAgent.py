@@ -1,5 +1,6 @@
 from Message import Message;
 from Agent import Agent;
+from math import isfinite
 
 
 
@@ -9,11 +10,18 @@ class SellerAgent(Agent):
     Agent Fournisseur (Vendeur).
     Constraints: tarif minimal, date de mise en vente.
     """
-    def __init__(self, name, min_price, release_date):
+    def __init__(self, name, min_price, release_date, initial_offer=None):
         super().__init__(name)
+        if isinstance(min_price, bool) or not isinstance(min_price, (int, float)) or not isfinite(min_price) or min_price < 0:
+            raise ValueError("min_price must be a non-negative number")
         self.min_price = min_price
         self.release_date = release_date
-        self.current_offer = min_price * 1.4  # Starts by asking 40% above minimum price
+        self.current_offer = (min_price * 1.4 if initial_offer is None
+                              else initial_offer)
+        if (isinstance(self.current_offer, bool)
+                or not isinstance(self.current_offer, (int, float))
+                or not isfinite(self.current_offer) or self.current_offer < min_price):
+            raise ValueError("initial_offer must be a number at least min_price")
 
     def receive_message(self, message):
         print(f"\n{self.name} reçoit: {message}")

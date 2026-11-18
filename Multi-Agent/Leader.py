@@ -11,11 +11,21 @@ class CoalitionLeaderAgent(Agent):
     Agent créé dynamiquement. Représente l'ensemble du groupe.
     (Émergence d'une organisation)
     """
-    def __init__(self, name, members, discount, v_func=None):
+    def __init__(self, name, members, discount, v_func=None,
+                 group_min_fare=400, group_release_date="01-Dec"):
         super().__init__(name)
+        if not members:
+            raise ValueError("a coalition must contain at least one member")
+        if not 0 <= discount < 1:
+            raise ValueError("discount must be in [0, 1)")
+        if group_min_fare <= 0:
+            raise ValueError("group_min_fare must be positive")
         self.members = members
         self.discount = discount
         self.v_func = v_func   # si on passe v, on calcule les transferts Shapley après l'accord
+        self.group_min_fare = group_min_fare
+        self.group_release_date = group_release_date
+        self.allocations = None
         self.total_budget = sum(m.budget for m in members)
         # Initialisés ici pour que receive_message() marche même avant negotiate_for_group()
         self.budget        = self.total_budget / len(members)  # budget moyen par défaut
@@ -44,23 +54,24 @@ class CoalitionLeaderAgent(Agent):
         print(f"[{self.name}] Budget cumulé : {self.total_budget}€.")
         print(f"[{self.name}] Réduction garantie par la coalition : {self.discount*100:.0f}%.")
 
-        # Le budget moyen du groupe sert de base pour le vendeur
-        # on applique la réduction de la coalition sur le prix min du vendeur
-        avg_budget = self.total_budget / len(self.members)
-        seller_min_price = avg_budget * 0.7 * (1 - self.discount)
+        # Tarif catalogue fourni indépendamment des budgets des acheteurs.
+        # Les prix négociés sont des totaux pour le nombre de billets du groupe.
+        quantity = len(self.members)
+        seller_min_price = self.group_min_fare * quantity * (1 - self.discount)
+        seller_initial_offer = self.group_min_fare * 1.4 * quantity * (1 - self.discount)
 
         group_seller = SellerAgent(
             name="GroupSeller",
             min_price=round(seller_min_price, 2),
-            release_date="01-Dec"
+            release_date=self.group_release_date,
+            initial_offer=round(seller_initial_offer, 2)
         )
         print(f"[{self.name}] Négociation avec {group_seller.name} "
-              f"(prix min vendeur : {group_seller.min_price}€, "
-              f"budget moyen acheteurs : {avg_budget:.2f}€).")
+              f"(plancher total : {group_seller.min_price:.2f}€, "
+              f"budget total : {self.total_budget:.2f}€).")
 
-        # on utilise le budget moyen (pas le cumulé) pour ne pas écraser la négo
-        self.budget = avg_budget
-        self.current_offer = avg_budget * 0.6
+        self.budget = self.total_budget
+        self.current_offer = self.total_budget * 0.6
         self.bid_count = 0
 
         initial_msg = Message(self, group_seller, "CFP", {"destination": "groupe"})
@@ -73,25 +84,53 @@ class CoalitionLeaderAgent(Agent):
         elif current_msg and current_msg.type == "ACCEPT":
             final_price = current_msg.content["price"]
             print(f"\n[{self.name}] ACCORD OBTENU à {final_price:.2f}€ "
-                  f"(soit {final_price/len(self.members):.2f}€/personne grâce à la coalition).")
-            share = final_price / len(self.members)
-            for m in self.members:
-                print(f"  → {m.name} paie {share:.2f}€ (budget initial : {m.budget}€, "
-                      f"économie : {m.budget - share:.2f}€)")
-            # partie c : si v est dispo, on affiche les transferts de tokens entre membres
+                  f"({final_price/quantity:.2f}€/billet en moyenne).")
+            budgets = {m.name: m.budget for m in self.members}
             if self.v_func is not None:
                 coalition_set = frozenset(m.name for m in self.members)
-                print_shapley_transfers(coalition_set, self.v_func, final_price)
-            # Avantage réel de la coalition : prix min vendeur avec vs sans réduction
-            solo_seller_min = round(avg_budget * 0.7, 2)
+                payments = print_shapley_transfers(
+                    coalition_set, self.v_func, final_price, budgets=budgets
+                )
+            else:
+                payments = _bounded_equal_allocation(final_price, budgets)
+            self.allocations = payments.copy()
+            for member in self.members:
+                paid = payments[member.name]
+                member.payment_due = paid
+                print(f"  → {member.name} paie {paid:.2f}€ "
+                      f"(budget : {member.budget:.2f}€, reste : {member.budget-paid:.2f}€)")
+            solo_seller_min = round(self.group_min_fare * quantity, 2)
             print(f"\n  ┌─ Avantage réel de la coalition :")
-            print(f"  │  Prix min vendeur SANS coalition : {solo_seller_min:.2f}€/pers.")
-            print(f"  │  Prix min vendeur AVEC coalition : {group_seller.min_price:.2f}€/pers.  (−{self.discount*100:.0f}% garanti par le groupe)")
-            print(f"  │  Gain garanti par le groupe      : {solo_seller_min - group_seller.min_price:.2f}€/pers.")
+            print(f"  │  Plancher sans remise : {solo_seller_min:.2f}€ au total")
+            print(f"  │  Plancher avec remise : {group_seller.min_price:.2f}€ au total")
+            print(f"  │  Économie plancher    : {solo_seller_min-group_seller.min_price:.2f}€ au total")
             print(f"  └───────────────────────────────────────────────────────")
         else:
             print(f"[{self.name}] Négociation de groupe échouée.")
 
         print(f"-----------------------------------------\n")
+
+
+def _bounded_equal_allocation(total, budgets):
+    """Allocate equally where possible, respecting every member's budget."""
+    if total > sum(budgets.values()) + 1e-8:
+        raise ValueError("agreement exceeds the coalition's combined budget")
+    remaining = set(budgets)
+    payments = {name: 0.0 for name in budgets}
+    amount_left = float(total)
+    while remaining:
+        share = amount_left / len(remaining)
+        capped = [name for name in remaining
+                  if share > budgets[name] - payments[name] + 1e-10]
+        if not capped:
+            for name in remaining:
+                payments[name] += share
+            break
+        for name in capped:
+            cap = budgets[name] - payments[name]
+            payments[name] += cap
+            amount_left -= cap
+            remaining.remove(name)
+    return payments
 
 

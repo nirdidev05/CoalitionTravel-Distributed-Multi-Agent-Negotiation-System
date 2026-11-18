@@ -1,6 +1,7 @@
 from Message import Message;
 from Agent import Agent;
-from datetime import datetime;
+from datetime import date, datetime;
+from math import isfinite
 
 
 class BuyerAgent(Agent):
@@ -21,10 +22,20 @@ class BuyerAgent(Agent):
       lower risk concedes. risk → 0 = big concession, risk → 1 = hold firm.
       The deadline-based rate caps the maximum concession (≤ 10%).
     """
-    def __init__(self, name, budget, deadline, blacklist=None, preferred=None):
+    def __init__(self, name, budget, deadline, blacklist=None, preferred=None,
+                 reference_date=None):
         super().__init__(name)
+        if isinstance(budget, bool) or not isinstance(budget, (int, float)) or not isfinite(budget) or budget <= 0:
+            raise ValueError("budget must be a positive number")
+        if not isinstance(deadline, (str, date, datetime)):
+            raise TypeError("deadline must be a date, datetime, or supported date string")
         self.budget   = budget
         self.deadline = deadline
+        self.reference_date = reference_date or date.today()
+        if isinstance(self.reference_date, datetime):
+            self.reference_date = self.reference_date.date()
+        if not isinstance(self.reference_date, date):
+            raise TypeError("reference_date must be a date or datetime")
 
         # Preferences — C1 p.51 (actes déclaratifs : refus catégoriques)
         self.blacklist = blacklist if blacklist is not None else []
@@ -34,6 +45,7 @@ class BuyerAgent(Agent):
         self.max_bids = 6
         self.bid_count = 0
         self.current_offer = budget * 0.6  # Starts by offering 60% of budget
+        self.payment_due = None
 
     # ------------------------------------------------------------------
     # Temporal pressure helpers  (C2, page 10)
@@ -41,13 +53,19 @@ class BuyerAgent(Agent):
 
     def _parse_deadline(self):
         """Parse 'DD-Mon' or 'DD-Mon-YYYY' deadline string into a datetime."""
+        if isinstance(self.deadline, datetime):
+            return self.deadline
+        if isinstance(self.deadline, date):
+            return datetime.combine(self.deadline, datetime.min.time())
+        if not self.deadline.strip():
+            return None
         for fmt in ("%d-%b-%Y", "%d-%b"):
             try:
                 dt = datetime.strptime(self.deadline, fmt)
                 if fmt == "%d-%b":
                     # No year given — assume current year, or next if already passed
-                    dt = dt.replace(year=datetime.today().year)
-                    if dt < datetime.today():
+                    dt = dt.replace(year=self.reference_date.year)
+                    if dt.date() < self.reference_date:
                         dt = dt.replace(year=dt.year + 1)
                 return dt
             except ValueError:
@@ -71,8 +89,7 @@ class BuyerAgent(Agent):
         if deadline_dt is None:
             return 0.10  # fallback: flat 10% if deadline unparseable
 
-        today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
-        days_remaining = (deadline_dt - today).days
+        days_remaining = (deadline_dt.date() - self.reference_date).days
 
         urgency = max(0.0, 1.0 - days_remaining / 30.0)
         rate    = 0.02 + urgency * 0.08
@@ -166,8 +183,7 @@ class BuyerAgent(Agent):
             days_remaining = None
             deadline_dt = self._parse_deadline()
             if deadline_dt:
-                days_remaining = (deadline_dt - datetime.today().replace(
-                    hour=0, minute=0, second=0, microsecond=0)).days
+                days_remaining = (deadline_dt.date() - self.reference_date).days
 
             print(f"{self.name} (Raisonnement): Prix trop haut. "
                   f"Soumission {self.bid_count}/{self.max_bids}. "

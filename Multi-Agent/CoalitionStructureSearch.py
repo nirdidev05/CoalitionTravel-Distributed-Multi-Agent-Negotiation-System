@@ -9,7 +9,37 @@ from scipy.optimize import milp, LinearConstraint, Bounds
 
 # petite fonction utilitaire pour convertir des indices en vrais noms d'agents
 def _v_idx(agents, v_named, S_indices):
-    return v_named(frozenset(agents[i] for i in S_indices))
+    value = v_named(frozenset(agents[i] for i in S_indices))
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, float, np.number)) or not np.isfinite(value):
+        raise ValueError("coalition values must be finite numbers")
+    return float(value)
+
+
+def _validate_agents(agents):
+    try:
+        unique_count = len(set(agents))
+    except TypeError as exc:
+        raise TypeError("agent identifiers must be hashable") from exc
+    if unique_count != len(agents):
+        raise ValueError("agent identifiers must be unique")
+
+
+def validate_partition(agents, structure):
+    """Raise ValueError unless structure partitions the agents exactly once."""
+    expected = set(agents)
+    seen = set()
+    for coalition in structure:
+        members = set(coalition)
+        if not members:
+            raise ValueError("partitions cannot contain empty coalitions")
+        if not members <= expected:
+            raise ValueError("partition contains unknown agents")
+        if seen.intersection(members):
+            raise ValueError("partition assigns an agent more than once")
+        seen.update(members)
+    if seen != expected:
+        raise ValueError("partition does not cover every agent")
+    return True
 
 
 # tous les sous-ensembles non vides de {0,...,n-1} classés par taille
@@ -27,7 +57,10 @@ def _all_subsets(n):
 # On calcule du plus petit au plus grand pour avoir les sous-problèmes déjà prêts.
 # Astuce pour éviter les doublons : le plus petit agent de C est toujours dans C1.
 def dp_search(agents, v):
+    _validate_agents(agents)
     n     = len(agents)
+    if n == 0:
+        return 0.0, [], 0
     f     = {}   # mémoïsation : frozenset d'indices -> (valeur, structure)
     count = 0    # pour compter combien de coalitions on a évaluées
 
@@ -59,6 +92,7 @@ def dp_search(agents, v):
     S_all       = frozenset(range(n))
     val, struct = f[S_all]
     named       = [frozenset(agents[i] for i in c) for c in struct]
+    validate_partition(agents, named)
     return val, named, count
 
 
@@ -71,7 +105,10 @@ def dp_search(agents, v):
 # Si non, on zappe toute la paire sans générer une seule combinaison.
 # UB[k] = meilleure valeur vue jusqu'ici parmi toutes les coalitions de taille k.
 def idp_search(agents, v):
+    _validate_agents(agents)
     n            = len(agents)
+    if n == 0:
+        return 0.0, [], 0, 0
     f            = {}
     UB           = {}   # UB[k] = max f(C) pour |C| = k
     count        = 0
@@ -121,6 +158,7 @@ def idp_search(agents, v):
     S_all       = frozenset(range(n))
     val, struct = f[S_all]
     named       = [frozenset(agents[i] for i in c) for c in struct]
+    validate_partition(agents, named)
     return val, named, count, pruned_pairs
 
 
@@ -133,7 +171,10 @@ def idp_search(agents, v):
 #   - contrainte : chaque agent appartient à exactement une coalition
 # Le solveur HiGHS (via scipy) gère la relaxation LP + branch-and-bound.
 def ip_search(agents, v):
+    _validate_agents(agents)
     n = len(agents)
+    if n == 0:
+        return 0.0, [], 0
 
     # toutes les coalitions non vides = 2^n - 1 variables
     all_coalitions = list(_all_subsets(n))
@@ -161,8 +202,45 @@ def ip_search(agents, v):
     selected   = [j for j in range(m) if result.x[j] > 0.5]
     opt_val    = -result.fun
     opt_struct = [frozenset(agents[i] for i in all_coalitions[j]) for j in selected]
+    validate_partition(agents, opt_struct)
 
     return opt_val, opt_struct, m
+
+
+def brute_force_search(agents, v, max_agents=10):
+    """Reference oracle for small instances; enumerates set partitions exactly."""
+    _validate_agents(agents)
+    n = len(agents)
+    if n > max_agents:
+        raise ValueError(f"brute-force oracle is limited to {max_agents} agents")
+    if n == 0:
+        return 0.0, [], 1
+
+    best_value = -float("inf")
+    best_structure = None
+    partitions_seen = 0
+
+    def visit(index, blocks):
+        nonlocal best_value, best_structure, partitions_seen
+        if index == n:
+            partitions_seen += 1
+            value = sum(_v_idx(agents, v, frozenset(block)) for block in blocks)
+            if value > best_value:
+                best_value = value
+                best_structure = [frozenset(block) for block in blocks]
+            return
+        for block in blocks:
+            block.add(index)
+            visit(index + 1, blocks)
+            block.remove(index)
+        blocks.append({index})
+        visit(index + 1, blocks)
+        blocks.pop()
+
+    visit(0, [])
+    named = [frozenset(agents[i] for i in block) for block in best_structure]
+    validate_partition(agents, named)
+    return best_value, named, partitions_seen
 
 
 # -----------------------------------------------------------------------
@@ -215,15 +293,45 @@ def shapley_value(agent, coalition, v):
 #
 # La somme des tokens est toujours nulle (efficacité : Σ phi_i = v_c).
 # Paiement final de i : part_égale - token_i  (un atout paie moins, un fardeau paie plus).
-def print_shapley_transfers(coalition, v, total_price):
+def print_shapley_transfers(coalition, v, total_price, budgets=None):
     agents_in_c = sorted(coalition)
     n   = len(agents_in_c)
+    if n == 0:
+        raise ValueError("coalition must not be empty")
+    if isinstance(total_price, bool) or not isinstance(total_price, (int, float, np.number)) or total_price < 0 or not np.isfinite(total_price):
+        raise ValueError("total_price must be a finite non-negative number")
     v_c = v(frozenset(agents_in_c))
-    if v_c == 0:
-        return
     equal_share = total_price / n
     avg_phi     = v_c / n   # contribution moyenne = part égale de la valeur créée
     shapley     = {a: shapley_value(a, frozenset(agents_in_c), v) for a in agents_in_c}
+    raw_payments = {a: equal_share - (shapley[a] - avg_phi) for a in agents_in_c}
+    if budgets is None:
+        payments = raw_payments
+    else:
+        if set(budgets) != set(agents_in_c):
+            raise ValueError("budgets must contain exactly the coalition members")
+        if any(isinstance(value, bool)
+               or not isinstance(value, (int, float, np.number))
+               or not np.isfinite(value) or value < 0
+               for value in budgets.values()):
+            raise ValueError("member budgets must be finite non-negative numbers")
+        if total_price > sum(budgets.values()) + 1e-8:
+            raise ValueError("agreement exceeds the coalition's combined budget")
+        payments = {a: min(max(raw_payments[a], 0.0), budgets[a]) for a in agents_in_c}
+        remainder = total_price - sum(payments.values())
+        while remainder > 1e-8:
+            eligible = [a for a in agents_in_c if budgets[a] - payments[a] > 1e-8]
+            if not eligible:
+                raise ValueError("cannot allocate agreement within member budgets")
+            increment = remainder / len(eligible)
+            used = 0.0
+            for a in eligible:
+                addition = min(increment, budgets[a] - payments[a])
+                payments[a] += addition
+                used += addition
+            remainder -= used
+        if any(abs(payments[a] - raw_payments[a]) > 1e-8 for a in agents_in_c):
+            print("  Ajustement appliqué pour respecter les budgets individuels.")
 
     print(f"\n  Valeur de Shapley & transferts de tokens (C3a, p.36-45) :")
     print(f"  {'Agent':<10} {'\u03c6\u1d62(v)':>8}  {'Part pay\u00e9e':>10}  {'Part \u00e9gale':>10}  Transfert token")
@@ -231,7 +339,7 @@ def print_shapley_transfers(coalition, v, total_price):
     for a in agents_in_c:
         phi     = shapley[a]
         token   = phi - avg_phi          # > 0 : atout (reçoit) ; < 0 : fardeau (envoie)
-        payment = equal_share - token    # un atout paie moins que la part égale
+        payment = payments[a]
         if abs(token) < 0.005:
             direction = "0.00\u20ac  (= moyenne)"
         elif token > 0:
@@ -242,3 +350,4 @@ def print_shapley_transfers(coalition, v, total_price):
     print(f"  {'\u2500'*10} {'\u2500'*8}  {'\u2500'*10}  {'\u2500'*10}  {'\u2500'*22}")
     print(f"  {'\u03a3':<10} {sum(shapley.values()):>8.2f}  {total_price:>10.2f}\u20ac  "
           f"(efficacit\u00e9 : \u03a3\u03c6\u1d62=v(c)={v_c:.2f}, \u03a3token=0)")
+    return payments

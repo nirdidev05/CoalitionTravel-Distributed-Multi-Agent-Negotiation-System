@@ -13,6 +13,11 @@ def run_alternating_negotiation(initial_message, first_receiver, max_turns=30):
     receiver named by the returned message. It works for BuyerAgent/SellerAgent as
     well as CoalitionLeaderAgent/ SellerAgent exchanges.
     """
+    if max_turns < 1:
+        raise ValueError("max_turns must be at least 1")
+    if initial_message is None or first_receiver is None:
+        raise ValueError("initial_message and first_receiver are required")
+
     current_message = initial_message
     receiver = first_receiver
     turns = 0
@@ -20,6 +25,8 @@ def run_alternating_negotiation(initial_message, first_receiver, max_turns=30):
     while current_message and current_message.type not in TERMINAL_TYPES:
         if turns >= max_turns:
             return None, turns
+        if current_message.receiver is not receiver:
+            raise ValueError("message receiver does not match the routed agent")
         reply = receiver.receive_message(current_message)
         current_message = reply
         if current_message:

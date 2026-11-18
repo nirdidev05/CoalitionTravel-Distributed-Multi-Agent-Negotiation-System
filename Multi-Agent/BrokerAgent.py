@@ -26,19 +26,27 @@ class BrokerAgent(Agent):
         self.group_min_fare = group_min_fare
         self.group_release_date = group_release_date
         self.formation_history = []
+        self._seen_subscriptions = set()
         # Dictionnaire pour stocker les listes d'attente : {"Tokyo": [agent1, agent2...]}
         self.subscriptions = {} 
 
     def receive_message(self, message):
         if message.type == "SUBSCRIBE":
-            destination = message.content["destination"]
+            if not isinstance(message.content, dict):
+                raise ValueError("SUBSCRIBE content must be a mapping")
+            destination = message.content.get("destination")
+            if not isinstance(destination, str) or not destination.strip():
+                raise ValueError("SUBSCRIBE requires a non-empty destination")
+            destination = destination.strip()
             buyer = message.sender
+            subscription_key = (destination, buyer.name)
+            if subscription_key in self._seen_subscriptions:
+                return
+            self._seen_subscriptions.add(subscription_key)
             
             # Ajouter l'agent à la liste d'attente pour cette destination
             if destination not in self.subscriptions:
                 self.subscriptions[destination] = []
-            if buyer in self.subscriptions[destination]:
-                return
             self.subscriptions[destination].append(buyer)
             
             print(f"[{self.name}] NOUVELLE INSCRIPTION : {buyer.name} veut aller à {destination}. "

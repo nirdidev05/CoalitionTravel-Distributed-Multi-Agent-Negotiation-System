@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coalition-travel"
+version = "0.2.0"
+description = "Deterministic multi-agent coalition negotiation with AI-ready request contracts"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26,<3",
+    "scipy>=1.13,<2",
+    "pydantic>=2.8,<3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "ruff>=0.11,<1"]
+
+[project.scripts]
+coalition-travel = "Entry:run_scenarios"
+coalition-travel-eval = "evaluate_requests:main"
+
+[tool.setuptools]
+package-dir = {"" = "Multi-Agent"}
+py-modules = [
+    "Agent",
+    "BrokerAgent",
+    "BuyerAgent",
+    "CoalitionStructureSearch",
+    "Entry",
+    "evaluate_requests",
+    "Leader",
+    "Message",
+    "Negotiation",
+    "SellerAgent",
+]
+
+[tool.setuptools.packages.find]
+where = ["Multi-Agent"]
+include = ["coalition_travel*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["Multi-Agent"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [".pdfpreview"]

@@ -3,3 +3,12 @@ Details.md
 scripts/
 Multi-Agent/__pycache__/
 Multi-Agent/*.pyc
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.egg-info/
+.env
+.env.*
+!.env.example

@@ -1,0 +1,154 @@
+import asyncio
+import io
+import json
+from datetime import date
+from urllib.error import URLError
+
+import pytest
+from coalition_travel.application.request_understanding import understand_request
+from coalition_travel.domain.request import TravelRequestDraft
+from coalition_travel.infrastructure.llm.ollama import (
+    LLMProviderError,
+    OllamaStructuredRequestExtractor,
+)
+from evaluate_requests import DEFAULT_DATASET, evaluate, load_dataset
+from pydantic import ValidationError
+
+
+def _http_response(content):
+    payload = {"message": {"role": "assistant", "content": content}}
+    return io.BytesIO(json.dumps(payload).encode("utf-8"))
+
+
+def test_ollama_adapter_sends_json_schema_and_validates_response(monkeypatch):
+    received = {}
+    output = json.dumps(
+        {
+            "destination": "Tokyo",
+            "travellers": 2,
+            "budget_per_person": "500.00",
+            "currency": "EUR",
+            "departure_after": None,
+            "arrival_before": "2027-02-20",
+            "direct_flight": "preferred",
+            "excluded_suppliers": [],
+        }
+    )
+
+    def fake_urlopen(request, timeout):
+        received["url"] = request.full_url
+        received["body"] = json.loads(request.data)
+        received["timeout"] = timeout
+        return _http_response(output)
+
+    monkeypatch.setattr("coalition_travel.infrastructure.llm.ollama.urlopen", fake_urlopen)
+    extractor = OllamaStructuredRequestExtractor("qwen-local", timeout_seconds=12)
+    reference_date = date(2026, 11, 18)
+
+    result = asyncio.run(extractor.extract("Two people to Tokyo", reference_date))
+
+    assert isinstance(result, TravelRequestDraft)
+    assert result.destination == "Tokyo"
+    assert result.arrival_before == date(2027, 2, 20)
+    assert received["url"] == "http://localhost:11434/api/chat"
+    assert received["body"]["format"] == TravelRequestDraft.model_json_schema()
+    assert received["body"]["options"]["temperature"] == 0
+    assert received["body"]["stream"] is False
+    assert reference_date.isoformat() in received["body"]["messages"][1]["content"]
+    assert received["timeout"] == 12
+
+
+def test_end_to_end_request_understanding_returns_validated_result_and_provider_metrics(
+    monkeypatch,
+):
+    output = json.dumps(
+        {
+            "destination": "Tokyo",
+            "travellers": 2,
+            "budget_per_person": "500.00",
+            "currency": "EUR",
+            "direct_flight": "any",
+            "excluded_suppliers": [],
+        }
+    )
+    monkeypatch.setattr(
+        "coalition_travel.infrastructure.llm.ollama.urlopen",
+        lambda request, timeout: _http_response(output),
+    )
+    extractor = OllamaStructuredRequestExtractor("qwen-local")
+
+    result = asyncio.run(
+        understand_request("Two people to Tokyo, max 500 EUR each", extractor, date(2026, 1, 1))
+    )
+
+    assert result.status == "ready"
+    assert result.provider == "ollama"
+    assert result.model == "qwen-local"
+    assert result.latency_ms >= 0
+
+
+def test_synthetic_evaluation_dataset_has_valid_annotated_records():
+    records = load_dataset(DEFAULT_DATASET)
+
+    assert len(records) == 8
+    assert len({record["id"] for record in records}) == len(records)
+    assert all(isinstance(record["expected"], TravelRequestDraft) for record in records)
+
+
+def test_evaluation_reports_provider_failures_and_attempt_latency():
+    class FailingExtractor:
+        provider_name = "fake"
+        model = "offline"
+
+        async def extract(self, text, reference_date):
+            raise LLMProviderError("offline")
+
+    result = asyncio.run(evaluate(load_dataset(DEFAULT_DATASET)[:1], FailingExtractor()))
+
+    assert result["successful_calls"] == 0
+    assert result["failed_calls"] == 1
+    assert result["mean_latency_ms"] is not None
+    assert result["errors"] == [{"id": "fr-basic", "error": "LLMProviderError"}]
+
+
+def test_ollama_adapter_reports_transport_errors_without_hiding_them(monkeypatch):
+    def failed_request(request, timeout):
+        raise URLError("offline")
+
+    monkeypatch.setattr("coalition_travel.infrastructure.llm.ollama.urlopen", failed_request)
+    extractor = OllamaStructuredRequestExtractor("qwen-local")
+
+    with pytest.raises(LLMProviderError, match="Ollama request failed"):
+        asyncio.run(extractor.extract("Tokyo", date(2026, 1, 1)))
+
+
+def test_ollama_adapter_keeps_schema_failures_distinct(monkeypatch):
+    monkeypatch.setattr(
+        "coalition_travel.infrastructure.llm.ollama.urlopen",
+        lambda request, timeout: _http_response('{"destination": "Tokyo", "travellers": 0}'),
+    )
+    extractor = OllamaStructuredRequestExtractor("qwen-local")
+
+    with pytest.raises(ValidationError):
+        asyncio.run(extractor.extract("Tokyo", date(2026, 1, 1)))
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"model": ""},
+        {"model": "test", "base_url": "localhost:11434"},
+        {"model": "test", "timeout_seconds": 0},
+        {"model": "test", "max_input_chars": 0},
+    ],
+)
+def test_ollama_adapter_rejects_invalid_configuration(kwargs):
+    with pytest.raises((TypeError, ValueError)):
+        OllamaStructuredRequestExtractor(**kwargs)
+
+
+def test_ollama_adapter_limits_input_size():
+    extractor = OllamaStructuredRequestExtractor("qwen-local", max_input_chars=5)
+
+    with pytest.raises(ValueError, match="exceeds"):
+        asyncio.run(extractor.extract("six chars", date(2026, 1, 1)))

@@ -8,11 +8,13 @@ from BuyerAgent import BuyerAgent
 from SellerAgent import SellerAgent
 from BrokerAgent import BrokerAgent
 from CoalitionStructureSearch import (
-    dp_search, idp_search, ip_search, brute_force_search,
+    dp_search, idp_search, ip_search,
     print_result, validate_partition,
 )
 from Negotiation import run_alternating_negotiation
 from Leader import CoalitionLeaderAgent
+from coalition_travel.application.optimization import CoalitionOptimizationService
+from coalition_travel.domain.coalition_problem import CoalitionProblem
 
 
 BUDGETS = {
@@ -24,13 +26,17 @@ BUDGETS = {
 }
 DISCOUNT = {1: 0.00, 2: 0.05, 3: 0.12, 4: 0.08, 5: 0.06}
 DISCOUNT_SUPERADDITIVE = {1: 0.00, 2: 0.05, 3: 0.10, 4: 0.20, 5: 0.30}
+BASE_GAME = CoalitionProblem(BUDGETS, DISCOUNT)
+SUPERADDITIVE_GAME = CoalitionProblem(BUDGETS, DISCOUNT_SUPERADDITIVE)
 
 
 def coalition_value(coalition, discounts=DISCOUNT):
     """Example characteristic function: group savings in euros."""
-    size = len(coalition)
-    total_budget = sum(BUDGETS[name] for name in coalition)
-    return total_budget * discounts.get(size, 0.0)
+    if discounts is DISCOUNT:
+        return BASE_GAME.value(coalition)
+    if discounts is DISCOUNT_SUPERADDITIVE:
+        return SUPERADDITIVE_GAME.value(coalition)
+    return CoalitionProblem(BUDGETS, discounts).value(coalition)
 
 
 def _run_negotiation(buyer, seller, destination, max_turns=30):
@@ -139,9 +145,15 @@ def run_scenarios(reference_date=None):
         for group in combinations(agents, size):
             print(f"    {set(group)} : {v(frozenset(group)):.2f}€")
     val_dp, struct_dp, count_dp = dp_search(agents, v)
-    val_idp, struct_idp, count_idp, pruned = idp_search(agents, v)
+    optimized = CoalitionOptimizationService().optimize(agents, v, verify=True)
+    val_idp = optimized.value
+    struct_idp = list(optimized.structure)
+    count_idp = optimized.evaluated_coalitions
+    pruned = optimized.pruned_pairs
     val_ip, struct_ip, count_ip = ip_search(agents, v)
-    val_oracle, struct_oracle, partitions = brute_force_search(agents, v)
+    val_oracle = optimized.oracle_value
+    struct_oracle = optimized.oracle_structure
+    partitions = optimized.oracle_partitions
     validate_partition(agents, struct_dp)
     validate_partition(agents, struct_idp)
     validate_partition(agents, struct_ip)
@@ -177,7 +189,7 @@ def run_scenarios(reference_date=None):
     _negotiate_structure(struct_idp, DISCOUNT, "structure optimale", value_fn=v,
                          reference_date=reference_date)
 
-    v_sa = lambda coalition: coalition_value(coalition, DISCOUNT_SUPERADDITIVE)
+    v_sa = SUPERADDITIVE_GAME.value
     val_sa, struct_sa, _, _ = idp_search(agents, v_sa)
     best_split_sa = max(
         v_sa(frozenset(group)) + v_sa(frozenset(set(agents) - set(group)))

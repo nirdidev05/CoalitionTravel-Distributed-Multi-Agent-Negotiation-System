@@ -11,11 +11,43 @@ Le dépôt contient maintenant une démonstration exécutable des négociations 
 Python 3.10 ou ultérieur est recommandé. Depuis la racine du dépôt :
 
 ```bash
-python -m pip install -r requirements.txt
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
 python Multi-Agent/Entry.py
 ```
 
-Les dépendances pour la recherche IP sont NumPy et SciPy. SciPy fournit le solveur HiGHS utilisé par `scipy.optimize.milp`.
+Le dépôt est installable en mode éditable avec `python -m pip install -e '.[dev]'`. La commande `coalition-travel` lance les démonstrations. NumPy et SciPy prennent en charge la recherche IP; SciPy fournit le solveur HiGHS utilisé par `scipy.optimize.milp`. Pydantic valide les données à la frontière d’entrée. `pyproject.toml` est la source des métadonnées et dépendances; `requirements.txt` conserve une commande d’installation simple.
+
+## État AI Engineering
+
+Le code reste une **simulation locale synchrone**. Les fondations livrées dans cette version sont :
+
+- `Multi-Agent/coalition_travel/domain/coalition_problem.py` contient une fonction de valeur indépendante des budgets globaux; chaque instance du problème possède ses propres budgets et remises.
+- `Multi-Agent/coalition_travel/domain/request.py` définit le contrat Pydantic `TravelRequestDraft` pour les champs candidats extraits d’une demande en langage naturel. Les champs manquants restent explicites et les champs inattendus sont rejetés.
+- `Multi-Agent/coalition_travel/application/request_understanding.py` sépare le contrat d’extraction, la validation métier et la demande de clarification. Les résultats exposent le statut, les champs à clarifier, le fournisseur et la latence.
+- `Multi-Agent/coalition_travel/infrastructure/llm/ollama.py` fournit un adaptateur Ollama local qui transmet le schéma JSON Pydantic et valide de nouveau la réponse côté application. Il distingue les erreurs de transport des sorties non conformes.
+- `data/eval/request_extraction.jsonl` et `Multi-Agent/evaluate_requests.py` fournissent un petit jeu synthétique et un évaluateur d’extraction par exact-match; ce jeu est un point de départ, pas encore un benchmark représentatif.
+- `Multi-Agent/coalition_travel/application/optimization.py` encapsule IDP dans un service qui retourne une structure de résultat et une latence mesurée. La vérification par force brute est optionnelle et désactivée par défaut; les démonstrations et tests peuvent l’activer sur les petites instances.
+- `tests/` vérifie les contrats, les agents, les règles de négociation et les algorithmes; Ruff contrôle le format et les erreurs de lint sur les nouveaux modules.
+
+**Pas encore réalisés :** SPADE/XMPP, API FastAPI, PostgreSQL, ingestion RAG/Qdrant, interface web et traces distribuées. L’adaptateur LLM existe, mais aucun modèle Ollama n’est installé sur cette machine et aucune inférence réelle n’a été mesurée. Le dossier de conception décrit les composants restants comme des étapes futures; le dépôt ne doit pas être présenté comme les ayant déjà implémentés.
+
+## Tests et qualité
+
+```bash
+python -m pytest
+ruff format --check Multi-Agent/coalition_travel tests Multi-Agent/evaluate_requests.py
+ruff check Multi-Agent/coalition_travel tests Multi-Agent/evaluate_requests.py
+```
+
+Avec Ollama installé, démarré et un modèle local téléchargé, évaluer l’extraction sur les exemples synthétiques :
+
+```bash
+OLLAMA_MODEL='<nom-du-modele-local>' coalition-travel-eval
+```
+
+Le rapport JSON contient le taux d’exact-match par champ, le score exact par demande, les erreurs et la latence moyenne. Les scénarios complets et leurs limites sont décrits dans [SCENARIOS.md](SCENARIOS.md). Les temps mesurés dans une seule exécution ne prouvent pas une accélération relative à une version antérieure.
 
 ## Scénarios exécutés
 
@@ -41,13 +73,13 @@ Les changements récents renforcent les comportements du modèle et rendent les 
 - **Formation de coalition plus robuste** — le broker ignore les inscriptions en double, permet de finaliser un groupe incomplet lorsque sa taille minimale est atteinte et conserve l’historique des coalitions formées. Les remises sont configurables.
 - **Vérification des partitions et référence exacte** — DP, IDP et IP valident que leur résultat couvre chaque agent exactement une fois. Un oracle exhaustif indépendant est ajouté pour les petites instances; le programme compare les valeurs optimales obtenues par les quatre méthodes et échoue si elles divergent.
 - **Démonstrations intégrées** — les scénarios réutilisent une même boucle d’alternance et montrent le fonctionnement réel du broker, les négociations de coalitions, les allocations individuelles et l’impact des ordres d’arrivée.
-- **Dépendances déclarées** — `requirements.txt` liste NumPy et SciPy pour permettre une installation reproductible des bibliothèques utilisées par les algorithmes.
+- **Dépendances déclarées** — `pyproject.toml` décrit NumPy, SciPy, Pydantic et les outils de développement; les fichiers `requirements*.txt` fournissent des commandes d’installation courtes.
 
 Ces corrections visent surtout la cohérence des résultats, la reproductibilité et la détection des erreurs. Les mesures ponctuelles sur l’instance de démonstration ont donné un IDP plus rapide que DP pour 5 et 8 agents, tandis que IP et l’oracle exhaustif étaient plus lents sur ces tailles. Elles ne constituent pas une preuve d’accélération par rapport à une version antérieure, faute de benchmark de référence mesuré dans les mêmes conditions.
 
 ## Résultats de validation
 
-La dernière exécution de `python Multi-Agent/Entry.py` dans un conteneur Docker Python s’est terminée avec le code de sortie 0 et a atteint `FIN DES SCÉNARIOS`. Les accords et allocations affichés dans les scénarios exécutés respectaient les budgets des membres. Les temps des algorithmes varient selon l’environnement et la fonction de valeur; les chiffres ponctuels ci-dessus ne sont pas des garanties de performance.
+La dernière suite locale compte **36 tests réussis**. Le contrôle Ruff passe sur les nouveaux modules. La commande `coalition-travel` s’est terminée avec le code de sortie 0 et a atteint `FIN DES SCÉNARIOS`. Les accords et allocations affichés respectaient les budgets des membres. Les temps varient selon l’environnement et la fonction de valeur; aucune accélération par rapport à une ancienne version n’a été mesurée dans des conditions identiques.
 
 ## Structure principale
 
@@ -58,4 +90,9 @@ La dernière exécution de `python Multi-Agent/Entry.py` dans un conteneur Docke
 - `Multi-Agent/Leader.py` — négociation de groupe et allocations.
 - `Multi-Agent/Negotiation.py` — routage des offres alternées.
 - `Multi-Agent/CoalitionStructureSearch.py` — DP, IDP, IP, oracle exhaustif et Shapley.
+- `Multi-Agent/coalition_travel/domain/` — fonction de valeur explicite et schéma de demande Pydantic.
+- `Multi-Agent/coalition_travel/application/` — clarification après extraction, évaluation et service d’optimisation.
+- `Multi-Agent/coalition_travel/infrastructure/llm/` — adaptateur Ollama local à sortie structurée.
+- `Multi-Agent/evaluate_requests.py` et `data/eval/` — commande et petit jeu synthétique d’évaluation.
+- `tests/` — tests unitaires et de contrat pour le domaine, les agents et les algorithmes.
 - `Multi-Agent/Message.py`, `Multi-Agent/Agent.py` — messages et classe agent de base.

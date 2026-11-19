@@ -1,0 +1,15 @@
+{
+  "version": "catalog-v1",
+  "catalog_file": "catalog_v1.json",
+  "catalog_sha256": "4b145ecbdbd662d49015ef199bcd60b03b63b2e131e2cdcb3c14d8b182dc3071",
+  "synthetic": true,
+  "currency": "EUR",
+  "offers": 3,
+  "purpose": "Fictional supplier offers for the CoalitionTravel MVP lot (phases P2 to P6): unit-offer compatibility, simulated negotiation and allocation tests.",
+  "limitations": [
+    "Prices and suppliers are fictional; nothing here is availability, a schedule or a commercial offer.",
+    "Seller floors are private parameters of the simulated seller (hypothesis H1); they are used only by the P3 negotiation simulator and are never shown to travellers.",
+    "Capacities are chosen so that the MVP lot satisfies hypothesis H2 (7 Tokyo seats against 60); they are not real seat inventories.",
+    "Any edit of catalog_v1.json requires updating catalog_sha256 here; the loader refuses a mismatch."
+  ]
+}

@@ -2,7 +2,9 @@
 
 import hashlib
 import json
+from collections.abc import Iterable
 from datetime import date
+from decimal import Context, Decimal, localcontext
 
 from BuyerAgent import BuyerAgent
 
@@ -37,10 +39,10 @@ def build_profiles(request: TravelRequestDraft) -> tuple[TravelerProfile, ...]:
                 departure_after=_field(item, "departure_after") or request.departure_after,
                 arrival_before=_field(item, "arrival_before") or request.arrival_before,
                 direct_flight=_field(item, "direct_flight") or request.direct_flight,
-                excluded_suppliers=(
-                    tuple(_field(item, "excluded_suppliers"))
-                    if _field(item, "excluded_suppliers") is not None
-                    else tuple(request.excluded_suppliers)
+                # Exclusions are hard constraints: a profile adds to the request-level list
+                # and can never remove from it (an empty or absent profile list adds nothing).
+                excluded_suppliers=_union_suppliers(
+                    request.excluded_suppliers, _field(item, "excluded_suppliers")
                 ),
             )
         )
@@ -49,41 +51,78 @@ def build_profiles(request: TravelRequestDraft) -> tuple[TravelerProfile, ...]:
 
     # A single request may describe the same homogeneous profile in multiple groups.
     # Consolidate those explicit groups; never combine profiles across request IDs.
-    merged = {}
-    for profile in result:
-        key = _negotiation_profile_key(profile)
-        if key in merged:
-            existing = merged[key]
-            merged[key] = TravelerProfile(
-                profile_id=f"merged-{key[:16]}",
-                traveller_count=existing.traveller_count + profile.traveller_count,
-                destination=existing.destination,
-                budget_per_person=existing.budget_per_person,
-                departure_after=existing.departure_after,
-                arrival_before=existing.arrival_before,
-                direct_flight=existing.direct_flight,
-                excluded_suppliers=existing.excluded_suppliers,
-            )
-        else:
+    return consolidate_profiles(result)
+
+
+def consolidate_profiles(profiles: Iterable[TravelerProfile]) -> tuple[TravelerProfile, ...]:
+    """Merge profiles of one request whose negotiation constraints are identical.
+
+    The first profile met keeps its field values (including supplier spellings); merged
+    groups receive the identifier ``merged-<key prefix>``. The result is sorted by
+    profile identifier. Applying the function twice returns the same tuple.
+    """
+    merged: dict[str, TravelerProfile] = {}
+    for profile in profiles:
+        if not isinstance(profile, TravelerProfile):
+            raise TypeError("consolidate_profiles expects TravelerProfile instances")
+        key = negotiation_profile_key(profile)
+        existing = merged.get(key)
+        if existing is None:
             merged[key] = profile
-    profiles = tuple(sorted(merged.values(), key=lambda profile: profile.profile_id))
-    if len({profile.profile_id for profile in profiles}) != len(profiles):
+            continue
+        merged[key] = TravelerProfile(
+            profile_id=f"merged-{key[:16]}",
+            traveller_count=existing.traveller_count + profile.traveller_count,
+            destination=existing.destination,
+            budget_per_person=existing.budget_per_person,
+            departure_after=existing.departure_after,
+            arrival_before=existing.arrival_before,
+            direct_flight=existing.direct_flight,
+            excluded_suppliers=existing.excluded_suppliers,
+        )
+    consolidated = tuple(sorted(merged.values(), key=lambda profile: profile.profile_id))
+    if len({profile.profile_id for profile in consolidated}) != len(consolidated):
         raise ValueError("profile identifiers collide after application normalization")
-    return profiles
+    return consolidated
 
 
-def _negotiation_profile_key(profile: TravelerProfile) -> str:
-    """Canonical key for constraints that affect a common negotiation."""
+def negotiation_profile_key(profile: TravelerProfile) -> str:
+    """Canonical key for constraints that affect a common negotiation.
+
+    Supplier exclusions are compared case-insensitively. The budget is serialized exactly,
+    independently of the caller's global Decimal context.
+    """
     key = {
         "destination": profile.destination.casefold(),
-        "budget_per_person": format(profile.budget_per_person.normalize(), "f"),
+        "budget_per_person": _canonical_decimal(profile.budget_per_person),
         "departure_after": profile.departure_after.isoformat() if profile.departure_after else None,
         "arrival_before": profile.arrival_before.isoformat() if profile.arrival_before else None,
         "direct_flight": profile.direct_flight,
-        "excluded_suppliers": sorted(profile.excluded_suppliers, key=str.casefold),
+        "excluded_suppliers": sorted(
+            {supplier.casefold() for supplier in profile.excluded_suppliers}
+        ),
     }
     serialized = json.dumps(key, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _canonical_decimal(value: Decimal) -> str:
+    """Exact trailing-zero-free form; normalize() would round under a reduced context."""
+    with localcontext(Context(prec=max(28, len(value.as_tuple().digits)))):
+        return format(value.normalize(), "f")
+
+
+def _union_suppliers(*supplier_lists: Iterable[str] | None) -> tuple[str, ...]:
+    """Union preserving order and the first spelling met, compared case-insensitively."""
+    seen: set[str] = set()
+    union: list[str] = []
+    for suppliers in supplier_lists:
+        for supplier in suppliers or ():
+            folded = supplier.casefold()
+            if folded not in seen:
+                seen.add(folded)
+                union.append(supplier)
+    return tuple(union)
 
 
 def _field(item, key, default=None):

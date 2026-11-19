@@ -4,7 +4,7 @@ import hashlib
 import json
 import subprocess
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -56,7 +56,7 @@ def create_run_metadata(
     manifest = load_manifest(dataset_path)
     run = {
         "run_id": str(uuid.uuid4()),
-        "recorded_at_utc": datetime.now(UTC).isoformat(),
+        "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
         "task": task,
         "code": git_revision(_find_repository_root(dataset_path)),
         "dataset": {

@@ -1,9 +1,10 @@
-from Message import Message;
-from Agent import Agent;
-from SellerAgent import SellerAgent;
-from CoalitionStructureSearch import print_shapley_transfers;
-from Negotiation import run_alternating_negotiation;
+from decimal import Decimal
 
+from Agent import Agent
+from CoalitionStructureSearch import print_shapley_transfers
+from Message import Message
+from Negotiation import run_alternating_negotiation
+from SellerAgent import SellerAgent
 
 
 class CoalitionLeaderAgent(Agent):
@@ -21,15 +22,16 @@ class CoalitionLeaderAgent(Agent):
         if group_min_fare <= 0:
             raise ValueError("group_min_fare must be positive")
         self.members = members
+        self.total_travellers = sum(getattr(member, "traveller_count", 1) for member in members)
         self.discount = discount
         self.v_func = v_func   # si on passe v, on calcule les transferts Shapley après l'accord
         self.group_min_fare = group_min_fare
         self.group_release_date = group_release_date
         self.allocations = None
-        self.total_budget = sum(m.budget for m in members)
+        self.total_budget = sum((Decimal(str(m.budget)) for m in members), Decimal(0))
         # Initialisés ici pour que receive_message() marche même avant negotiate_for_group()
         self.budget        = self.total_budget / len(members)  # budget moyen par défaut
-        self.current_offer = self.budget * 0.6
+        self.current_offer = float(self.budget) * 0.6
         self.bid_count     = 0
 
     def receive_message(self, message):
@@ -43,20 +45,20 @@ class CoalitionLeaderAgent(Agent):
             if self.bid_count > 6:
                 print(f"[{self.name}] Max soumissions atteint. REJET.")
                 return Message(self, message.sender, "REJECT", {"reason": "Max bids reached"})
-            self.current_offer = min(self.budget, self.current_offer * 1.10)
+            self.current_offer = min(float(self.budget), self.current_offer * 1.10)
             print(f"[{self.name}] Contre-offre du groupe : {self.current_offer:.2f}€.")
             return Message(self, message.sender, "PROPOSE", {"price": self.current_offer})
 
     def negotiate_for_group(self):
-        print(f"\n  ÉTAPE 3 — CoalitionLeaderAgent négocie directement avec le vendeur.")
-        print(f"\n--- DÉBUT DE LA NÉGOCIATION DE GROUPE ---")
-        print(f"[{self.name}] Je représente {len(self.members)} acheteurs.")
+        print("\n  ÉTAPE 3 — CoalitionLeaderAgent négocie directement avec le vendeur.")
+        print("\n--- DÉBUT DE LA NÉGOCIATION DE GROUPE ---")
+        print(f"[{self.name}] Je représente {self.total_travellers} voyageurs.")
         print(f"[{self.name}] Budget cumulé : {self.total_budget}€.")
         print(f"[{self.name}] Réduction garantie par la coalition : {self.discount*100:.0f}%.")
 
         # Tarif catalogue fourni indépendamment des budgets des acheteurs.
         # Les prix négociés sont des totaux pour le nombre de billets du groupe.
-        quantity = len(self.members)
+        quantity = self.total_travellers
         seller_min_price = self.group_min_fare * quantity * (1 - self.discount)
         seller_initial_offer = self.group_min_fare * 1.4 * quantity * (1 - self.discount)
 
@@ -70,12 +72,16 @@ class CoalitionLeaderAgent(Agent):
               f"(plancher total : {group_seller.min_price:.2f}€, "
               f"budget total : {self.total_budget:.2f}€).")
 
-        self.budget = self.total_budget
-        self.current_offer = self.total_budget * 0.6
+        per_person_caps = [getattr(member, "budget_per_person", None) for member in self.members]
+        known_caps = [Decimal(str(cap)) for cap in per_person_caps if cap is not None]
+        common_cap = min(known_caps) * quantity if known_caps else self.total_budget
+        # Convert only at the legacy float-price negotiation boundary.
+        self.budget = min(float(self.total_budget), float(common_cap))
+        self.current_offer = self.budget * 0.6
         self.bid_count = 0
 
         initial_msg = Message(self, group_seller, "CFP", {"destination": "groupe"})
-        current_msg, turns = run_alternating_negotiation(
+        current_msg, _turns = run_alternating_negotiation(
             initial_msg, group_seller, max_turns=30
         )
 
@@ -85,7 +91,7 @@ class CoalitionLeaderAgent(Agent):
             final_price = current_msg.content["price"]
             print(f"\n[{self.name}] ACCORD OBTENU à {final_price:.2f}€ "
                   f"({final_price/quantity:.2f}€/billet en moyenne).")
-            budgets = {m.name: m.budget for m in self.members}
+            budgets = {m.name: float(m.budget) for m in self.members}
             if self.v_func is not None:
                 coalition_set = frozenset(m.name for m in self.members)
                 payments = print_shapley_transfers(
@@ -100,15 +106,15 @@ class CoalitionLeaderAgent(Agent):
                 print(f"  → {member.name} paie {paid:.2f}€ "
                       f"(budget : {member.budget:.2f}€, reste : {member.budget-paid:.2f}€)")
             solo_seller_min = round(self.group_min_fare * quantity, 2)
-            print(f"\n  ┌─ Avantage réel de la coalition :")
+            print("\n  ┌─ Avantage réel de la coalition :")
             print(f"  │  Plancher sans remise : {solo_seller_min:.2f}€ au total")
             print(f"  │  Plancher avec remise : {group_seller.min_price:.2f}€ au total")
             print(f"  │  Économie plancher    : {solo_seller_min-group_seller.min_price:.2f}€ au total")
-            print(f"  └───────────────────────────────────────────────────────")
+            print("  └───────────────────────────────────────────────────────")
         else:
             print(f"[{self.name}] Négociation de groupe échouée.")
 
-        print(f"-----------------------------------------\n")
+        print("-----------------------------------------\n")
 
 
 def _bounded_equal_allocation(total, budgets):

@@ -63,6 +63,36 @@ def test_ollama_adapter_sends_json_schema_and_validates_response(monkeypatch):
     assert received["timeout"] == 12
 
 
+def test_ollama_adapter_includes_retrieved_context_with_source_references(monkeypatch):
+    received = {}
+    output = json.dumps(
+        {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "500",
+            "currency": "EUR",
+            "direct_flight": "any",
+            "excluded_suppliers": [],
+        }
+    )
+
+    def fake_urlopen(request, timeout):
+        received["body"] = json.loads(request.data)
+        return _http_response(output)
+
+    monkeypatch.setattr("coalition_travel.infrastructure.llm.ollama.urlopen", fake_urlopen)
+    extractor = OllamaStructuredRequestExtractor("qwen-local")
+    context = "[source=policy.md; document_id=policy]\nPolicy passage"
+
+    result = asyncio.run(extractor.extract_with_context("Tokyo", date(2026, 1, 1), context))
+
+    assert isinstance(result, TravelRequestDraft)
+    user_prompt = received["body"]["messages"][1]["content"]
+    assert "<knowledge_context>" in user_prompt
+    assert "source=policy.md" in user_prompt
+    assert "</knowledge_context>" in user_prompt
+
+
 def test_end_to_end_request_understanding_returns_validated_result_and_provider_metrics(
     monkeypatch,
 ):

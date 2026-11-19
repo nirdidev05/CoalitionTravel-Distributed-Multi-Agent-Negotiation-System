@@ -1,7 +1,9 @@
-from Message import Message;
-from Agent import Agent;
-from datetime import date, datetime;
+from datetime import date, datetime
+from decimal import Decimal
 from math import isfinite
+
+from Agent import Agent
+from Message import Message
 
 
 class BuyerAgent(Agent):
@@ -23,10 +25,19 @@ class BuyerAgent(Agent):
       The deadline-based rate caps the maximum concession (≤ 10%).
     """
     def __init__(self, name, budget, deadline, blacklist=None, preferred=None,
-                 reference_date=None):
+                 reference_date=None, traveller_count=1, budget_per_person=None,
+                 departure_after=None, arrival_before=None, direct_flight="any"):
         super().__init__(name)
-        if isinstance(budget, bool) or not isinstance(budget, (int, float)) or not isfinite(budget) or budget <= 0:
+        if (isinstance(budget, bool) or not isinstance(budget, (int, float, Decimal))
+                or not isfinite(budget) or budget <= 0):
             raise ValueError("budget must be a positive number")
+        if isinstance(traveller_count, bool) or not isinstance(traveller_count, int) or traveller_count < 1:
+            raise ValueError("traveller_count must be a positive integer")
+        self.traveller_count = traveller_count
+        self.budget_per_person = budget_per_person
+        self.departure_after = departure_after
+        self.arrival_before = arrival_before
+        self.direct_flight = direct_flight
         if not isinstance(deadline, (str, date, datetime)):
             raise TypeError("deadline must be a date, datetime, or supported date string")
         self.budget   = budget
@@ -44,7 +55,7 @@ class BuyerAgent(Agent):
         # Constraints TP
         self.max_bids = 6
         self.bid_count = 0
-        self.current_offer = budget * 0.6  # Starts by offering 60% of budget
+        self.current_offer = float(budget) * 0.6  # Legacy proposal messages use float prices.
         self.payment_due = None
 
     # ------------------------------------------------------------------
@@ -123,9 +134,10 @@ class BuyerAgent(Agent):
           risk proche de 0 -> je crains le conflit, c'est à moi de CONCÉDER.
         Règle : à chaque tour, l'agent dont le risque est le plus faible concède.
         """
-        u_mine     = self.budget - my_offer       # u_i(d_i) : utilité si MON offre passe
-        u_theirs   = self.budget - their_offer    # u_i(d_j) : utilité si j'accepte LEUR offre
-        u_conflict = -self.budget                 # cours : 0 ; ici -budget -> risque borné [0,1]
+        budget = float(self.budget)
+        u_mine     = budget - my_offer       # u_i(d_i) : utilité si MON offre passe
+        u_theirs   = budget - their_offer    # u_i(d_j) : utilité si j'accepte LEUR offre
+        u_conflict = -budget                 # cours : 0 ; ici -budget -> risque borné [0,1]
 
         denom = u_mine - u_conflict
         if denom <= 0:
@@ -194,7 +206,7 @@ class BuyerAgent(Agent):
                 print(f"{self.name} (Zeuthen): mon risque est maximal, je TIENS BON "
                       f"et j'attends que le vendeur concède.")
 
-            self.current_offer = min(self.budget, self.current_offer * (1 + rate))
+            self.current_offer = min(float(self.budget), self.current_offer * (1 + rate))
 
             return Message(self, message.sender, "PROPOSE", {"price": self.current_offer})
 

@@ -1,11 +1,12 @@
 """Validation and clarification policy for structured LLM extraction results."""
 
+import asyncio
 from dataclasses import dataclass
 from datetime import date, datetime
 from time import perf_counter
 from typing import Literal, Protocol
 
-from coalition_travel.domain.request import TravelRequestDraft
+from coalition_travel.application.request_contracts import TravelRequestDraft
 
 
 class RequestExtractionError(RuntimeError):
@@ -31,6 +32,12 @@ class RequestProviderError(RequestExtractionError):
 class StructuredRequestExtractor(Protocol):
     async def extract(self, text: str, reference_date: date) -> TravelRequestDraft:
         """Extract facts or raise RequestExtractionError on technical failure."""
+
+
+class ContextAwareStructuredRequestExtractor(Protocol):
+    async def extract_with_context(
+        self, text: str, reference_date: date, knowledge_context: str
+    ) -> TravelRequestDraft: ...
 
 
 @dataclass(frozen=True)
@@ -71,6 +78,11 @@ def validate_request_draft(
         and request.departure_after > request.arrival_before
     ):
         errors.append("departure_after must not be after arrival_before")
+    for profile in request.profiles:
+        if profile.departure_after and profile.departure_after < reference_date:
+            errors.append(f"profile {profile.profile_id}: departure_after is before reference date")
+        if profile.arrival_before and profile.arrival_before < reference_date:
+            errors.append(f"profile {profile.profile_id}: arrival_before is before reference date")
     if errors:
         return RequestUnderstandingResult(status="invalid", request=request, errors=tuple(errors))
     return RequestUnderstandingResult(status="ready", request=request)
@@ -80,6 +92,7 @@ async def understand_request(
     text: str,
     extractor: StructuredRequestExtractor,
     reference_date: date,
+    knowledge_service=None,
 ) -> RequestUnderstandingResult:
     """Run extraction, schema validation and business validation in order.
 
@@ -95,7 +108,21 @@ async def understand_request(
     started = perf_counter()
     provider = getattr(extractor, "provider_name", extractor.__class__.__name__)
     model = getattr(extractor, "model", None)
-    draft = await extractor.extract(text.strip(), reference_date)
+    clean_text = text.strip()
+    if knowledge_service is not None:
+        context = await asyncio.to_thread(
+            knowledge_service.augment_prompt,
+            clean_text,
+            filters={"domain": "business_knowledge"},
+        )
+        contextual_extract = getattr(extractor, "extract_with_context", None)
+        if contextual_extract is None:
+            raise ExtractorContractError(
+                "knowledge retrieval requires an extractor with extract_with_context"
+            )
+        draft = await contextual_extract(clean_text, reference_date, context)
+    else:
+        draft = await extractor.extract(clean_text, reference_date)
     if not isinstance(draft, TravelRequestDraft):
         raise ExtractorContractError(
             f"extractor must return a validated TravelRequestDraft; received {type(draft).__name__}"

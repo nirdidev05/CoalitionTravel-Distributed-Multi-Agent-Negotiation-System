@@ -11,8 +11,8 @@ from math import ceil
 from pathlib import Path
 
 from coalition_travel.application.evaluation import score_extractions
+from coalition_travel.application.request_contracts import TravelRequestDraft
 from coalition_travel.application.request_understanding import RequestExtractionError
-from coalition_travel.domain.request import TravelRequestDraft
 from coalition_travel.infrastructure.llm.ollama import OllamaStructuredRequestExtractor
 
 DEFAULT_DATASET = Path(__file__).resolve().parents[1] / "data/eval/request_extraction.jsonl"

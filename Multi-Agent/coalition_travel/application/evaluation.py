@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal
 
-from coalition_travel.domain.request import TravelRequestDraft
+from coalition_travel.application.request_contracts import TravelRequestDraft
 
 REQUEST_FIELDS = tuple(TravelRequestDraft.model_fields)
 

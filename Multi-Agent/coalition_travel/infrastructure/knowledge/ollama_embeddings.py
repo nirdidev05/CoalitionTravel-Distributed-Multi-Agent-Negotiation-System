@@ -6,12 +6,16 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from coalition_travel.application.knowledge import KnowledgeRetrievalError
+from coalition_travel.application.knowledge import EmbeddingIdentity, KnowledgeRetrievalError
 
 
 class OllamaEmbedder:
     def __init__(
-        self, model: str, base_url: str = "http://localhost:11434", timeout_seconds: float = 30
+        self,
+        model: str,
+        base_url: str = "http://localhost:11434",
+        timeout_seconds: float = 30,
+        configuration_signature: str = "/api/embed-default-options-v1",
     ):
         if not isinstance(model, str) or not model.strip():
             raise ValueError("embedding model must not be blank")
@@ -28,6 +32,11 @@ class OllamaEmbedder:
         self.model = model.strip()
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.identity = EmbeddingIdentity(
+            provider="ollama",
+            model=self.model,
+            configuration_signature=configuration_signature,
+        )
 
     def embed(self, text: str) -> list[float]:
         request = Request(
@@ -54,6 +63,9 @@ class OllamaEmbedder:
         if not isinstance(vector, list) or not vector:
             raise KnowledgeRetrievalError("Ollama returned an invalid embedding")
         try:
-            return [float(value) for value in vector]
-        except (TypeError, ValueError) as exc:
+            values = [float(value) for value in vector]
+        except (TypeError, ValueError, OverflowError) as exc:
             raise KnowledgeRetrievalError("Ollama returned a non-numeric embedding") from exc
+        if any(not isfinite(value) for value in values):
+            raise KnowledgeRetrievalError("Ollama returned a non-finite embedding")
+        return values

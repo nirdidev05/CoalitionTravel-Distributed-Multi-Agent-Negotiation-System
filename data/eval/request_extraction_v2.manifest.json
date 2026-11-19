@@ -1,0 +1,12 @@
+{
+  "version": "request-extraction-v2",
+  "synthetic": true,
+  "records": 26,
+  "format": "JSONL: id, case_type, reference_date, text, expected TravelRequestDraft, expected_status; optional annotation",
+  "status_policy": "expected_status is reviewed label ready, needs_clarification, or invalid; validation code is not a substitute for semantic review",
+  "limitations": [
+    "Synthetic cases are not representative of real traveler traffic.",
+    "Annotations are hand-authored fixtures and should receive domain review before being used for model selection.",
+    "Exact match is intentionally strict; a valid Pydantic response may still be semantically wrong."
+  ]
+}

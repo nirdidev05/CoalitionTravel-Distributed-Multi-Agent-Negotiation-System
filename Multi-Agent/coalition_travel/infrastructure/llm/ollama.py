@@ -17,6 +17,8 @@ from coalition_travel.application.request_understanding import (
     StructuredOutputError,
 )
 
+EXTRACTION_PROMPT_VERSION = "travel-request-extraction-v1"
+
 
 class LLMProviderError(RequestProviderError):
     """Raised when the configured LLM service cannot return a valid response."""
@@ -31,6 +33,8 @@ class OllamaStructuredRequestExtractor:
         base_url: str = "http://localhost:11434",
         timeout_seconds: float = 60.0,
         max_input_chars: int = 12_000,
+        temperature: float = 0.0,
+        seed: int | None = None,
     ):
         if not isinstance(model, str) or not model.strip():
             raise ValueError("model must be a non-empty string")
@@ -50,11 +54,30 @@ class OllamaStructuredRequestExtractor:
             or max_input_chars < 1
         ):
             raise ValueError("max_input_chars must be a positive integer")
+        if (
+            isinstance(temperature, bool)
+            or not isinstance(temperature, (int, float))
+            or not isfinite(temperature)
+            or temperature < 0
+        ):
+            raise ValueError("temperature must be finite and non-negative")
+        if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or seed < 0):
+            raise ValueError("seed must be a non-negative integer when provided")
 
         self.model = model.strip()
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.max_input_chars = max_input_chars
+        self.temperature = float(temperature)
+        self.seed = seed
+        self.prompt_version = EXTRACTION_PROMPT_VERSION
+
+    @property
+    def inference_parameters(self) -> dict:
+        parameters = {"temperature": self.temperature, "stream": False}
+        if self.seed is not None:
+            parameters["seed"] = self.seed
+        return parameters
 
     async def extract(self, text: str, reference_date: date) -> TravelRequestDraft:
         if not isinstance(text, str) or not text.strip():
@@ -111,7 +134,10 @@ class OllamaStructuredRequestExtractor:
                 {"role": "user", "content": user_prompt},
             ],
             "format": TravelRequestDraft.model_json_schema(),
-            "options": {"temperature": 0},
+            "options": {
+                "temperature": self.temperature,
+                **({"seed": self.seed} if self.seed is not None else {}),
+            },
             "stream": False,
         }
         request = Request(

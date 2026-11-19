@@ -1,0 +1,10 @@
+{
+  "version": "request-profiles-v1",
+  "synthetic": true,
+  "records": 7,
+  "format": "JSONL: id, text, expected_profiles; IDs and profile order are excluded from semantic scoring",
+  "limitations": [
+    "Synthetic cases are not representative of real traveler traffic.",
+    "This profile-only set focuses on splits and constraint preservation; full request extraction is evaluated separately."
+  ]
+}

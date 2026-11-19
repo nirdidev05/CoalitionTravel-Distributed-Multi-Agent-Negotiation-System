@@ -5,7 +5,11 @@ from decimal import Decimal
 import pytest
 from BrokerAgent import BrokerAgent
 from coalition_travel.application.compatibility import evaluate_compatibility
-from coalition_travel.application.knowledge import KnowledgeDocument, KnowledgeService
+from coalition_travel.application.knowledge import (
+    EmbeddingIdentity,
+    KnowledgeDocument,
+    KnowledgeService,
+)
 from coalition_travel.application.profiles import build_profiles, create_buyer_agents
 from coalition_travel.application.request_understanding import understand_request
 from coalition_travel.application.travel_workflow import process_travel_request
@@ -350,6 +354,8 @@ def test_application_only_forms_coalition_when_shared_offer_passes_all_profiles(
 
 def test_conditional_compatibility_retrieves_shared_business_and_supplier_sources(tmp_path):
     class Embedder:
+        identity = EmbeddingIdentity("test", "profile-test-v1", "counts-v1")
+
         def embed(self, text):
             lowered = text.casefold()
             return [
@@ -408,6 +414,8 @@ def test_conditional_compatibility_retrieves_shared_business_and_supplier_source
 
 def test_request_understanding_can_use_shared_business_knowledge_retrieval(tmp_path):
     class Embedder:
+        identity = EmbeddingIdentity("test", "request-test-v1", "counts-v1")
+
         def embed(self, text):
             return [float(text.lower().count("business")), float(len(text))]
 

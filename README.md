@@ -38,10 +38,18 @@ Le code reste une **simulation locale synchrone**. Les fondations livrées dans 
 - `TravelRequestDraft.profiles` accepte des groupes explicitement exprimés. Si la liste est vide, l’application crée un seul profil couvrant tous les voyageurs. Les groupes identiques d’une même demande sont consolidés ; la somme des effectifs doit égaler le total déclaré. Les demandes indépendantes ne sont jamais fusionnées automatiquement.
 - `application/profiles.py` résout les contraintes communes et les exceptions de profil, consolide les groupes de contraintes identiques au sein d’une même demande, puis crée un `BuyerAgent` stable par identifiant de demande et profil effectif. Le budget total du profil est calculé en `Decimal` comme budget par personne × effectif. Le contrat numérique historique des négociations reste en flottants à la frontière des prix.
 - `application/compatibility.py` vérifie une offre candidate structurée : destination, plafond par personne, dates, caractère direct et fournisseur exclu. Sans offre vérifiable, l’état est `conditional`. Si le service RAG est fourni, cet état peut inclure des références de règles métier et fournisseurs ; elles ne changent jamais la décision de disponibilité. Le broker conserve les résultats conditionnels comme candidats, n’ajoute une coalition au parcours intégré qu’avec une décision applicative typée confirmant une offre commune, et n’enchaîne pas sur le vendeur simulé historique. Il isole les cohortes par demande et ignore les rejoués. Le chemin historique de `Entry.py` garde son comportement.
-- `application/knowledge.py` fournit un service de connaissances partagé avec découpage, embeddings, recherche Top-K, filtres de métadonnées et augmentation du prompt conservant les sources. `infrastructure/knowledge/` fournit l’ingestion hors ligne `.txt`/`.md`, un adaptateur d’embeddings Ollama et un stockage SQLite persistant avec classement cosinus. Les domaines (`business_knowledge`, `supplier_knowledge`, `negotiation_knowledge`) sont des métadonnées, pas des bases indépendantes. Le même modèle d’embedding doit être utilisé à l’indexation et à la recherche.
+- `application/knowledge.py` fournit un service de connaissances partagé avec découpage, embeddings, recherche Top-K, filtres de métadonnées et augmentation du prompt conservant les sources. `infrastructure/knowledge/` fournit l’ingestion hors ligne `.txt`/`.md`, un adaptateur d’embeddings Ollama et un stockage SQLite persistant avec classement cosinus. Une réindexation calcule et valide d’abord tous les vecteurs, puis remplace les chunks d’un document dans une transaction SQLite; une erreur laisse la version précédente intacte. Le stockage conserve fournisseur, modèle, signature de configuration et dimension, et refuse un autre espace d’embedding. Une ancienne base contenant des vecteurs sans identité est préservée mais refusée; il faut la réindexer explicitement dans une nouvelle base plutôt que lui attribuer une identité supposée. Les domaines (`business_knowledge`, `supplier_knowledge`, `negotiation_knowledge`) sont des métadonnées, pas des bases indépendantes; le workflow actuel consulte les deux premiers, tandis que le troisième n’est pas raccordé à un consommateur.
+- Le score minimal de retrieval `min_relevance_score` est configurable sur `KnowledgeService` et peut être remplacé à chaque recherche avec `min_score`, entre -1 et 1. La valeur par défaut `0.0` écarte les similarités cosinus négatives; elle n’est pas un seuil empiriquement optimal et ne garantit pas à elle seule la pertinence sémantique. Il faut mesurer plusieurs seuils sur un jeu de requêtes et jugements de pertinence avant de les choisir pour un usage évalué.
 - `understand_request` et `process_travel_request` peuvent recevoir le service de connaissances ; le contexte métier est alors récupéré pour la compréhension. Les vendeurs et stratégies d’agents restent déterministes et ne consultent pas le RAG tant qu’ils n’ont pas de raisonnement documentaire justifié. Les PDF, les prix et disponibilités en temps réel ne sont pas ingérés ni déduits par ce pipeline.
+- `application/evaluation.py` conserve les exact-match de demande et par champ et ajoute des métriques d’effectifs, de contraintes et de profils complets. Les profils sont comparés sans leurs IDs techniques et indépendamment de leur ordre; les effectifs et contraintes restent significatifs. Les nombres comparent leur valeur mathématique (`500`, `500.0`, `Decimal("500.00")`), les chaînes sont comparées sans casse après suppression des espaces périphériques, tandis que `None` reste distinct d’une chaîne vide. Ces métriques caractérisent les sorties mais ne remplacent pas un jeu d’évaluation annoté représentatif.
 
 Le pipeline RAG ne nécessite pas Qdrant ou une bibliothèque vectorielle additionnelle. SQLite et le calcul cosinus en mémoire conviennent à une petite base locale ; la recherche relit et classe les vecteurs indexés, donc un moteur vectoriel dédié pourra devenir pertinent si le corpus grandit. L’endpoint d’embedding utilisé est Ollama `POST /api/embed`; voir la [documentation API officielle Ollama](https://github.com/ollama/ollama/blob/main/docs/api.md) et sa [documentation sur les embeddings](https://github.com/ollama/ollama/blob/main/docs/capabilities/embeddings.mdx). Aucun appel Ollama réel n’est nécessaire aux tests.
+
+### Évaluation expérimentale Phase 3G
+
+`data/eval/request_extraction_v2.jsonl` (26 exemples) et `request_profiles_v1.jsonl` (7 exemples) sont des jeux synthétiques versionnés, non représentatifs de demandes réelles. `data/eval/rag/` contient 12 passages de test et 12 requêtes avec jugements gradués. `python -m evaluate_requests --validate-only` et `python -m evaluate_retrieval --validate-only` contrôlent les jeux sans modèle. Avec Ollama, les commandes mesurent les exact-match d’extraction et de profils, ainsi que Precision@K, Recall@K, MRR, nDCG, latence et balayage des seuils. La CLI RAG exige un nouvel index SQLite par modèle et refuse l’écrasement d’une base existante. Les seuils testés ne sont pas des recommandations.
+
+Le rapport détaillé, les limites expérimentales et les diagrammes réel/cible se trouvent dans [docs/PHASE_3G_EVALUATION_AND_ARCHITECTURE.md](docs/PHASE_3G_EVALUATION_AND_ARCHITECTURE.md). Dans l’environnement vérifié pour la Phase 3G, Ollama et son service local ne sont pas disponibles : aucun score de modèle ou de pertinence n’est donc revendiqué.
 
 ## Tests et qualité
 
@@ -57,7 +65,7 @@ Avec Ollama installé, démarré et un modèle local téléchargé, évaluer l�
 OLLAMA_MODEL='<nom-du-modele-local>' coalition-travel-eval
 ```
 
-Le rapport JSON contient le taux d’exact-match par champ, le score exact par demande, les erreurs et la latence moyenne. Les scénarios complets et leurs limites sont décrits dans [SCENARIOS.md](SCENARIOS.md). Les temps mesurés dans une seule exécution ne prouvent pas une accélération relative à une version antérieure.
+Le rapport JSON contient le taux d’exact-match par champ et par demande, les métriques de profils, les erreurs et la latence moyenne. Les scénarios complets et leurs limites sont décrits dans [SCENARIOS.md](SCENARIOS.md). Les temps mesurés dans une seule exécution ne prouvent pas une accélération relative à une version antérieure. Pour reproduire un test, consigner le modèle Ollama exact, sa version/digest lorsqu’il est disponible, le dataset, le corpus, le chunking, Top-K, le seuil, la version du prompt et les erreurs.
 
 ## Scénarios exécutés
 
@@ -89,7 +97,7 @@ Ces corrections visent surtout la cohérence des résultats, la reproductibilit�
 
 ## Résultats de validation
 
-La dernière suite locale compte **36 tests réussis**. Le contrôle Ruff passe sur les nouveaux modules. La commande `coalition-travel` s’est terminée avec le code de sortie 0 et a atteint `FIN DES SCÉNARIOS`. Les accords et allocations affichés respectaient les budgets des membres. Les temps varient selon l’environnement et la fonction de valeur; aucune accélération par rapport à une ancienne version n’a été mesurée dans des conditions identiques.
+La suite locale compte **131 tests réussis lors de la validation Phase 3G**. Ruff check et le contrôle de format passent sur les fichiers Phase 3G. Le contrôle global Ruff signale des problèmes préexistants dans `Entry.py`, `Negotiation.py` et `SellerAgent.py`; le format global signale neuf fichiers historiques. `Entry.py` a été exécuté jusqu'à `FIN DES SCÉNARIOS` avec code 0. Aucun benchmark LLM ou retrieval réel n'a été exécuté faute d'Ollama disponible. Les temps varient selon l’environnement et la fonction de valeur; aucune accélération par rapport à une ancienne version n’a été mesurée dans des conditions identiques.
 
 ## Structure principale
 
@@ -100,9 +108,9 @@ La dernière suite locale compte **36 tests réussis**. Le contrôle Ruff passe 
 - `Multi-Agent/Leader.py` — négociation de groupe et allocations.
 - `Multi-Agent/Negotiation.py` — routage des offres alternées.
 - `Multi-Agent/CoalitionStructureSearch.py` — DP, IDP, IP, oracle exhaustif et Shapley.
-- `Multi-Agent/coalition_travel/domain/` — fonction de valeur explicite et schéma de demande Pydantic.
+- `Multi-Agent/coalition_travel/domain/` — profils voyageurs, compatibilité et fonction de valeur; les contrats Pydantic de demande sont dans `application/request_contracts.py`.
 - `Multi-Agent/coalition_travel/application/` — clarification après extraction, évaluation et service d’optimisation.
 - `Multi-Agent/coalition_travel/infrastructure/llm/` — adaptateur Ollama local à sortie structurée.
-- `Multi-Agent/evaluate_requests.py` et `data/eval/` — commande et petit jeu synthétique d’évaluation.
+- `Multi-Agent/evaluate_requests.py`, `Multi-Agent/evaluate_retrieval.py` et `data/eval/` — commandes et jeux synthétiques d’évaluation.
 - `tests/` — tests unitaires et de contrat pour le domaine, les agents et les algorithmes.
 - `Multi-Agent/Message.py`, `Multi-Agent/Agent.py` — messages et classe agent de base.

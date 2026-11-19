@@ -1,0 +1,17 @@
+{
+  "version": "rag-queries-v1",
+  "synthetic": true,
+  "query_count": 12,
+  "relevance_scale": {
+    "0": "not relevant (implicit for every unlisted passage)",
+    "1": "partially relevant",
+    "2": "relevant",
+    "3": "highly relevant"
+  },
+  "annotation_policy": "Judgment IDs use the corpus v1 one-chunk reference form document_id:0. The evaluator maps these to source passages, collapses multiple retrieved chunks to their source document, and ranks each passage once so alternate chunk-size sweeps remain comparable. Unlisted documents have grade 0. Queries and judgments are synthetic and intended to validate the evaluation pipeline, not support claims about production retrieval.",
+  "limitations": [
+    "One query per narrow test intent/domain pair gives no statistical power.",
+    "Judgments are authored with the synthetic corpus and may favor its vocabulary.",
+    "No model was run to create these relevance labels."
+  ]
+}

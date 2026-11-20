@@ -1,0 +1,1327 @@
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/application/trip_proposal.py b/Multi-Agent/coalition_travel/application/trip_proposal.py
+--- a/Multi-Agent/coalition_travel/application/trip_proposal.py	2026-11-20 04:02:18
++++ b/Multi-Agent/coalition_travel/application/trip_proposal.py	2026-11-20 05:03:17
+@@ -32,7 +32,7 @@
+     FormationResult,
+     FormedBlock,
+ )
+-from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.request_contracts import TravelRequestDraft, draft_document
+ from coalition_travel.application.savings_allocation import (
+     ALLOCATION_VERSION,
+     BlockAllocation,
+@@ -45,6 +45,9 @@
+ from coalition_travel.domain.travel_unit import TravelUnit
+ 
+ TRIP_PROPOSAL_SCHEMA = "trip-proposal-v1"
++# v2 (scope review I4, D-I4-10): the v1 contract plus the route fields, for route requests
++# only. A v1 proposal never carries a route field and keeps its bytes.
++TRIP_PROPOSAL_SCHEMA_V2 = "trip-proposal-v2"
+ 
+ # Plan §1.2: the exact notice; it contains no forbidden word.
+ SIMULATION_NOTICE = (
+@@ -196,6 +199,8 @@
+     unit_id: str
+     seats: int
+     budget_total_cents: int
++    origin_key: str | None = None  # v2 only
++    trip_type: str | None = None  # v2 only
+ 
+ 
+ @dataclass(frozen=True)
+@@ -224,6 +229,15 @@
+ 
+ 
+ @dataclass(frozen=True)
++class LegView:
++    departure_date: date
++    arrival_date: date
++    direct: bool
++    capacity_seats: int
++    leg_ref: str
++
++
++@dataclass(frozen=True)
+ class OfferView:
+     offer_id: str
+     supplier_id: str
+@@ -236,6 +250,10 @@
+     admissible: bool
+     violations: tuple[ViolationView, ...]
+     notes: tuple[NoteView, ...]
++    origin: str | None = None  # v2 only
++    trip_type: str | None = None  # v2 only
++    outbound: LegView | None = None  # v2 only
++    return_leg: LegView | None = None  # v2 only; JSON key "return"
+ 
+ 
+ @dataclass(frozen=True)
+@@ -480,8 +498,17 @@
+     provenance: Provenance
+ 
+     def __post_init__(self):
+-        if self.schema != TRIP_PROPOSAL_SCHEMA:
++        if self.schema not in (TRIP_PROPOSAL_SCHEMA, TRIP_PROPOSAL_SCHEMA_V2):
+             raise ProposalConsistencyError(f"schema must be {TRIP_PROPOSAL_SCHEMA}")
++        route = self.schema == TRIP_PROPOSAL_SCHEMA_V2
++        if route != (self.unit.origin_key is not None):
++            raise ProposalConsistencyError("the v2 schema is exactly for a unit with a route")
++        if not route and any(
++            getattr(item, name) is not None
++            for item in (self.unit, *self.offers)
++            for name in V2_ONLY_FIELDS[type(item)]
++        ):
++            raise ProposalConsistencyError("a v1 proposal never carries a route field")
+         code = self.status.code
+         if code not in UNIT_STATUS_CODES:
+             raise ProposalConsistencyError(f"unknown unit status {code!r}")
+@@ -561,10 +588,12 @@
+     explanations.sort(key=Explanation.sort_key)
+     modifiers = tuple(item.code for item in explanations if item.level == "modifier")
+     return TripProposal(
+-        schema=TRIP_PROPOSAL_SCHEMA,
++        schema=TRIP_PROPOSAL_SCHEMA_V2 if unit.is_route_unit else TRIP_PROPOSAL_SCHEMA,
+         simulation=Simulation(),
+-        request=ValidatedRequest(request_id, _freeze(draft.model_dump(mode="json"))),
+-        unit=UnitView(unit.unit_id, unit.seats, unit.budget_total_cents),
++        request=ValidatedRequest(request_id, _freeze(draft_document(draft))),
++        unit=UnitView(
++            unit.unit_id, unit.seats, unit.budget_total_cents, unit.origin_key, unit.trip_type
++        ),
+         status=UnitStatus(code, modifiers),
+         offers=offers,
+         solo=_solo_view(plan, unit.unit_id),
+@@ -851,11 +880,23 @@
+                         key=lambda note: (note.code, note.profile_id),
+                     )
+                 ),
++                origin=offer.origin,
++                trip_type=offer.trip_type,
++                outbound=_leg_view(offer.outbound),
++                return_leg=_leg_view(offer.return_leg),
+             )
+         )
+     return tuple(sorted(views, key=lambda view: view.offer_id))
+ 
+ 
++def _leg_view(leg) -> LegView | None:
++    if leg is None:
++        return None
++    return LegView(
++        leg.departure_date, leg.arrival_date, leg.direct, leg.capacity_seats, leg.leg_ref
++    )
++
++
+ # --- negotiation, block and allocation views ----------------------------------------------
+ 
+ 
+@@ -975,8 +1016,39 @@
+ # --- schema introspection (T-CONF-3) ------------------------------------------------------
+ 
+ 
+-def contract_field_names() -> frozenset[str]:
+-    """Every field name of the public contract, for the closed-schema tests."""
++# Fields that exist in trip-proposal-v2 only, and their JSON names when they differ.
++V2_ONLY_FIELDS: Mapping[type, tuple[str, ...]] = MappingProxyType(
++    {
++        UnitView: ("origin_key", "trip_type"),
++        OfferView: ("origin", "trip_type", "outbound", "return_leg"),
++    }
++)
++JSON_NAMES: Mapping[str, str] = MappingProxyType({"return_leg": "return"})
++
++
++def public_fields(value) -> list[tuple[str, object]]:
++    """(JSON name, value) of a contract object, in field order; a v1 object omits the
++    v2-only fields (they are None there, see TripProposal.__post_init__)."""
++    hidden = () if _route_view(value) else V2_ONLY_FIELDS.get(type(value), ())
++    return [
++        (JSON_NAMES.get(item.name, item.name), getattr(value, item.name))
++        for item in fields(value)
++        if item.name not in hidden
++    ]
++
++
++def _route_view(value) -> bool:
++    if type(value) is UnitView:
++        return value.origin_key is not None
++    if type(value) is OfferView:
++        return value.origin is not None
++    return True
++
++
++def contract_field_names(schema: str = TRIP_PROPOSAL_SCHEMA) -> frozenset[str]:
++    """Every JSON field name of the public contract, for the closed-schema tests."""
++    if schema not in (TRIP_PROPOSAL_SCHEMA, TRIP_PROPOSAL_SCHEMA_V2):
++        raise ValueError(f"unknown schema {schema!r}")
+     names: set[str] = set()
+     pending: list[type] = [TripProposal, *PARAMS_BY_CODE.values()]
+     seen: set[type] = set()
+@@ -985,8 +1057,11 @@
+         if cls in seen:
+             continue
+         seen.add(cls)
++        hidden = V2_ONLY_FIELDS.get(cls, ()) if schema == TRIP_PROPOSAL_SCHEMA else ()
+         for item in fields(cls):
+-            names.add(item.name)
++            if item.name in hidden:
++                continue
++            names.add(JSON_NAMES.get(item.name, item.name))
+             pending.extend(_dataclasses_in(item.type))
+     return frozenset(names)
+ 
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/infrastructure/llm/ollama.py b/Multi-Agent/coalition_travel/infrastructure/llm/ollama.py
+--- a/Multi-Agent/coalition_travel/infrastructure/llm/ollama.py	2026-11-19 02:04:43
++++ b/Multi-Agent/coalition_travel/infrastructure/llm/ollama.py	2026-11-20 05:08:42
+@@ -17,7 +17,8 @@
+     StructuredOutputError,
+ )
+ 
+-EXTRACTION_PROMPT_VERSION = "travel-request-extraction-v1"
++# v2 (I4, D-I4-12): the schema gained the route fields, so the prompt is versioned with it.
++EXTRACTION_PROMPT_VERSION = "travel-request-extraction-v2"
+ 
+ 
+ class LLMProviderError(RequestProviderError):
+@@ -116,7 +117,13 @@
+             "different needs. Never invent a split; if no distinct groups are stated, leave "
+             "profiles empty so the application represents everyone as one group. Profile IDs "
+             "must be short unique labels within this request. Put shared constraints on the "
+-            "request and only explicit overrides on each profile."
++            "request and only explicit overrides on each profile. "
++            "Copy place names exactly as the user wrote them; never translate or expand them. "
++            "Fill origin and trip_type only when the user states them: round_trip when a return "
++            "is mentioned, one_way when the user says so. departure_after and departure_before "
++            "bound the outbound departure date, return_after and return_before the return "
++            "departure date; an exact date gives a window that starts and ends on that date, and "
++            "a month gives its first and last day."
+         )
+         user_prompt = (
+             f"Reference date: {reference_date.isoformat()}\n"
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/infrastructure/presentation/explanations_fr.py b/Multi-Agent/coalition_travel/infrastructure/presentation/explanations_fr.py
+--- a/Multi-Agent/coalition_travel/infrastructure/presentation/explanations_fr.py	2026-11-20 04:05:33
++++ b/Multi-Agent/coalition_travel/infrastructure/presentation/explanations_fr.py	2026-11-20 05:04:26
+@@ -60,12 +60,27 @@
+     "destination": "la destination",
+     "travellers": "le nombre de voyageurs",
+     "budget_per_person": "le budget par personne",
++    # route requests (I4)
++    "origin": "le lieu de départ",
++    "trip_type": "le type de trajet (aller simple ou aller-retour)",
++    "departure_after": "la date de départ au plus tôt",
++    "departure_before": "la date de départ au plus tard",
++    "return_after": "la date de retour au plus tôt",
++    "return_before": "la date de retour au plus tard",
+ }
+ CLARIFICATION_QUESTIONS = {
+     "destination": "Quelle est la destination du voyage ?",
+     "travellers": "Combien de personnes voyagent ?",
+     "budget_per_person": "Quel est le budget par personne, en euros ?",
++    # route requests (I4)
++    "origin": "D'où partez-vous ?",
++    "trip_type": "S'agit-il d'un aller simple ou d'un aller-retour ?",
++    "departure_after": "À partir de quelle date pouvez-vous partir ?",
++    "departure_before": "Jusqu'à quelle date pouvez-vous partir ?",
++    "return_after": "À partir de quelle date pouvez-vous revenir ?",
++    "return_before": "Jusqu'à quelle date pouvez-vous revenir ?",
+ }
++PLACE_FIELD_LABELS = {"origin": "le lieu de départ", "destination": "la destination"}
+ 
+ 
+ def needs_clarification_message(missing_fields) -> str:
+@@ -73,8 +88,12 @@
+     return "Il manque des informations pour traiter la demande : " + ", ".join(labels) + "."
+ 
+ 
+-def unknown_place_message() -> str:
+-    return "Le lieu demandé n'est pas reconnu par le référentiel des lieux."
++def unknown_place_message(fields=(), known_places=()) -> str:
++    """The unknown value is never quoted; the known places are public catalogue data."""
++    if not fields:
++        return "Le lieu demandé n'est pas reconnu par le référentiel des lieux."
++    labels = " et ".join(PLACE_FIELD_LABELS[field] for field in fields)
++    return f"Lieu non reconnu pour {labels}. Lieux disponibles : {', '.join(known_places)}."
+ 
+ 
+ REQUEST_REJECTION_MESSAGES = {
+@@ -105,6 +124,12 @@
+     "direct_flight_required": "un vol direct est exigé et l'offre comporte une escale",
+     "excluded_supplier": "le fournisseur de l'offre est exclu",
+     "unit_exceeds_offer_capacity": "la demande compte plus de voyageurs que la capacité de l'offre",
++    # route packages (I4, NON_FINANCIAL_V2)
++    "origin_mismatch": "le lieu de départ de l'offre ne correspond pas à la demande",
++    "trip_type_mismatch": "le type de trajet de l'offre ne correspond pas à la demande",
++    "departure_after_window": "le départ a lieu après la date de départ demandée",
++    "return_before_window": "le retour part avant la date de retour demandée",
++    "return_after_window": "le retour part après la date de retour demandée",
+ }
+ 
+ 
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/infrastructure/presentation/json_renderer.py b/Multi-Agent/coalition_travel/infrastructure/presentation/json_renderer.py
+--- a/Multi-Agent/coalition_travel/infrastructure/presentation/json_renderer.py	2026-11-20 04:05:33
++++ b/Multi-Agent/coalition_travel/infrastructure/presentation/json_renderer.py	2026-11-20 05:04:26
+@@ -14,7 +14,7 @@
+ import json
+ import re
+ from collections.abc import Mapping
+-from dataclasses import fields, is_dataclass
++from dataclasses import is_dataclass
+ from datetime import date
+ from fractions import Fraction
+ 
+@@ -24,13 +24,19 @@
+     TravelerProfileDraft,
+     TravelRequestDraft,
+ )
+-from coalition_travel.application.request_understanding import REQUIRED_FIELDS
++from coalition_travel.application.request_understanding import (
++    REQUIRED_FIELDS,
++    REQUIRED_FIELDS_V2,
++)
+ from coalition_travel.application.trip_planning import RequestRejection
+-from coalition_travel.application.trip_proposal import Explanation, TripProposal
++from coalition_travel.application.trip_proposal import Explanation, TripProposal, public_fields
+ from coalition_travel.infrastructure.presentation.explanations_fr import explanation_message
+ from coalition_travel.infrastructure.presentation.vocabulary import forbidden_words_in
+ 
+ STATUS_SCHEMA = "trip-request-status-v1"
++# v2 (scope review I4, D-I4-10): for route requests only. The v1 schema is unchanged.
++STATUS_SCHEMA_V2 = "trip-request-status-v2"
++PLACE_FIELDS = ("origin", "destination")
+ SOURCES = ("draft-json", "llm", "replay")
+ NOT_VALIDATED_REASONS = ("refused", "empty_answer", "end_of_input")
+ COMMON_KEYS = frozenset({"schema", "status", "source", "reference_date"})
+@@ -78,7 +84,7 @@
+             "message": explanation_message(value),
+         }
+     if is_dataclass(value) and not isinstance(value, type):
+-        return {item.name: to_data(getattr(value, item.name)) for item in fields(value)}
++        return {name: to_data(item) for name, item in public_fields(value)}
+     if isinstance(value, Fraction):
+         return f"{value.numerator}/{value.denominator}"
+     if isinstance(value, date):
+@@ -155,28 +161,32 @@
+ # --- status documents ---------------------------------------------------------------------
+ 
+ 
+-def _common(status: str, source: str, reference_date: date) -> dict:
++def _common(status: str, source: str, reference_date: date, schema=STATUS_SCHEMA) -> dict:
+     return {
+-        "schema": STATUS_SCHEMA,
++        "schema": schema,
+         "status": status,
+         "source": source,
+         "reference_date": reference_date.isoformat(),
+     }
+ 
+ 
+-def needs_clarification_document(*, source, reference_date, missing_fields, rounds) -> dict:
+-    return _common("needs_clarification", source, reference_date) | {
++def needs_clarification_document(
++    *, source, reference_date, missing_fields, rounds, schema=STATUS_SCHEMA
++) -> dict:
++    return _common("needs_clarification", source, reference_date, schema) | {
+         "missing_fields": list(missing_fields),
+         "rounds": rounds,
+     }
+ 
+ 
+-def invalid_document(*, source, reference_date, errors) -> dict:
+-    return _common("invalid", source, reference_date) | {"errors": list(errors)}
++def invalid_document(*, source, reference_date, errors, schema=STATUS_SCHEMA) -> dict:
++    return _common("invalid", source, reference_date, schema) | {"errors": list(errors)}
+ 
+ 
+-def request_rejected_document(*, source, reference_date, rejection: RequestRejection) -> dict:
+-    return _common("request_rejected", source, reference_date) | {
++def request_rejected_document(
++    *, source, reference_date, rejection: RequestRejection, schema=STATUS_SCHEMA
++) -> dict:
++    return _common("request_rejected", source, reference_date, schema) | {
+         "reason": rejection.reason,
+         "rejection_status": "other" if rejection.status is None else rejection.status,
+         "missing_fields": list(rejection.missing_fields),
+@@ -184,10 +194,19 @@
+     }
+ 
+ 
+-def not_validated_document(*, source, reference_date, reason) -> dict:
+-    return _common("not_validated", source, reference_date) | {"reason": reason}
++def not_validated_document(*, source, reference_date, reason, schema=STATUS_SCHEMA) -> dict:
++    return _common("not_validated", source, reference_date, schema) | {"reason": reason}
+ 
+ 
++def unknown_place_document(*, source, reference_date, fields, known_places) -> dict:
++    """v2 only (D-I4-9): which place fields are unknown, and the known canonical names.
++    The unknown value itself is never written."""
++    return _common("unknown_place", source, reference_date, STATUS_SCHEMA_V2) | {
++        "fields": list(fields),
++        "known_places": list(known_places),
++    }
++
++
+ def _ordered_required(values) -> bool:
+     return (
+         isinstance(values, list)
+@@ -218,6 +237,8 @@
+ 
+ def validate_status_document(document) -> int:
+     """Check the closed schema, keys and values; return the exit code of the document."""
++    if isinstance(document, dict) and document.get("schema") == STATUS_SCHEMA_V2:
++        return _validate_v2(document)
+     if not isinstance(document, dict):
+         raise StatusDocumentError("a status document is a JSON object")
+     status = document.get("status")
+@@ -254,6 +275,106 @@
+         return 3
+     if status == "request_rejected":
+         return _rejected_exit_code(document)
++    if document["reason"] not in NOT_VALIDATED_REASONS:
++        raise StatusDocumentError("reason outside refused, empty_answer, end_of_input")
++    return 4
++
++
++# --- trip-request-status-v2 (I4) ----------------------------------------------------------
++
++_ROUTE_FIXED = (
++    "departure_before must not be before the reference date",
++    "return_after must not be before the reference date",
++    "return_before must not be before the reference date",
++    "departure_after must not be after departure_before",
++    "return_after must not be after return_before",
++    "a one_way request must not have a return window",
++    "the return window must not end before the departure window starts",
++)
++ROUTE_VALIDATION_FORMS = tuple(re.compile(re.escape(text)) for text in _ROUTE_FIXED) + (
++    re.compile(
++        rf"profile {_PROFILE_ID}: (departure_before|return_after|return_before) "
++        "is before reference date"
++    ),
++    re.compile(rf"profile {_PROFILE_ID}: the (departure|return) window is empty"),
++    re.compile(rf"profile {_PROFILE_ID}: a one_way request must not have a return window"),
++    re.compile(
++        rf"profile {_PROFILE_ID}: the return window ends before the departure window starts"
++    ),
++)
++STATUS_KEYS_V2 = STATUS_KEYS | {"unknown_place": frozenset({"fields", "known_places"})}
++
++
++def _ordered_subset(values, reference) -> bool:
++    return (
++        isinstance(values, list)
++        and bool(values)
++        and all(isinstance(value, str) for value in values)
++        and values == [field for field in reference if field in values]
++        and len(set(values)) == len(values)
++    )
++
++
++def _validate_v2(document) -> int:
++    status = document.get("status")
++    if not isinstance(status, str) or status not in STATUS_KEYS_V2:
++        raise StatusDocumentError("unknown status")
++    if set(document) != COMMON_KEYS | STATUS_KEYS_V2[status]:
++        raise StatusDocumentError("keys differ from the closed schema")
++    if any(value is None for value in document.values()):
++        raise StatusDocumentError("no null value is allowed")
++    if document["source"] not in SOURCES:
++        raise StatusDocumentError("source outside its domain")
++    reference = document["reference_date"]
++    if not isinstance(reference, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", reference):
++        raise StatusDocumentError("reference_date is an ISO date")
++    try:
++        date.fromisoformat(reference)
++    except ValueError as exc:
++        raise StatusDocumentError("reference_date is an ISO date") from exc
++    validation_forms = VALIDATION_FORMS + ROUTE_VALIDATION_FORMS
++    if status == "needs_clarification":
++        rounds = document["rounds"]
++        if not _ordered_subset(document["missing_fields"], REQUIRED_FIELDS_V2):
++            raise StatusDocumentError("missing_fields: ordered subset of REQUIRED_FIELDS_V2")
++        if type(rounds) is not int or not 0 <= rounds <= MAX_CLARIFICATION_ROUNDS:
++            raise StatusDocumentError("rounds is an integer from 0 to 3")
++        if document["source"] == "draft-json" and rounds != 0:
++            raise StatusDocumentError("no clarification round with --draft-json")
++        return 2
++    if status == "invalid":
++        errors = document["errors"]
++        if not isinstance(errors, list) or not errors:
++            raise StatusDocumentError("errors is a non-empty list")
++        if not all(_matches(error, ERROR_FORMS + ROUTE_VALIDATION_FORMS) for error in errors):
++            raise StatusDocumentError("an error string is outside the domain E")
++        return 3
++    if status == "unknown_place":
++        known = document["known_places"]
++        if not _ordered_subset(document["fields"], PLACE_FIELDS):
++            raise StatusDocumentError("fields: ordered subset of origin, destination")
++        if (
++            not isinstance(known, list)
++            or not known
++            or any(not isinstance(name, str) or not name.strip() for name in known)
++            or known != sorted(set(known))
++        ):
++            raise StatusDocumentError("known_places: sorted, unique, non-blank names")
++        return 2
++    if status == "request_rejected":
++        reason, rejection = document["reason"], document["rejection_status"]
++        missing, errors = document["missing_fields"], document["errors"]
++        if not isinstance(missing, list) or not isinstance(errors, list):
++            raise StatusDocumentError("missing_fields and errors are lists")
++        if reason == "request_not_ready" and rejection == "needs_clarification":
++            if _ordered_subset(missing, REQUIRED_FIELDS_V2) and errors == []:
++                return 2
++        elif reason == "request_not_ready" and rejection == "invalid":
++            if missing == [] and errors and all(_matches(e, validation_forms) for e in errors):
++                return 3
++        elif reason in BUDGET_REJECTIONS and rejection == "other" and not missing and not errors:
++            return 3
++        raise StatusDocumentError("request_rejected outside its five allowed rows")
+     if document["reason"] not in NOT_VALIDATED_REASONS:
+         raise StatusDocumentError("reason outside refused, empty_answer, end_of_input")
+     return 4
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/infrastructure/presentation/text_renderer.py b/Multi-Agent/coalition_travel/infrastructure/presentation/text_renderer.py
+--- a/Multi-Agent/coalition_travel/infrastructure/presentation/text_renderer.py	2026-11-20 04:05:26
++++ b/Multi-Agent/coalition_travel/infrastructure/presentation/text_renderer.py	2026-11-20 05:05:57
+@@ -10,7 +10,7 @@
+ from collections.abc import Mapping
+ from decimal import Decimal
+ 
+-from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.request_contracts import TravelRequestDraft, draft_document
+ from coalition_travel.application.trip_proposal import (
+     JournalView,
+     TripProposal,
+@@ -22,6 +22,7 @@
+     explanation_message,
+     forbidden_term_message,
+     needs_clarification_message,
++    unknown_place_message,
+     violation_text,
+ )
+ from coalition_travel.infrastructure.presentation.json_renderer import ensure_vocabulary
+@@ -73,7 +74,59 @@
+     return ", ".join(values) if values else "aucun"
+ 
+ 
++TRIP_TYPE_LABELS = {"one_way": "aller simple", "round_trip": "aller-retour"}
++
++
++def _window(after, before) -> str:
++    if after is None and before is None:
++        return "non précisée"
++    if after == before:
++        return f"le {after}"
++    return f"entre le {_date(after)} et le {_date(before)}"
++
++
++def _route_request_lines(draft: Mapping) -> list[str]:
++    """Summary of a v2 request (I4): the route, then the v1 fields that keep a meaning."""
++    trip_type = draft["trip_type"]
++    lines = [
++        f"- départ de : {draft['origin']}",
++        f"- destination : {draft['destination']}",
++        f"- type de trajet : {TRIP_TYPE_LABELS.get(trip_type, 'non précisé')}",
++        f"- voyageurs : {draft['travellers']}",
++        f"- budget par personne : {_decimal_euros(draft['budget_per_person'])}",
++        f"- départ de l'aller : {_window(draft['departure_after'], draft['departure_before'])}",
++    ]
++    if trip_type != "one_way":
++        lines.append(
++            f"- départ du retour : {_window(draft['return_after'], draft['return_before'])}"
++        )
++    lines += [
++        f"- arrivée de l'aller au plus tard : {_date(draft['arrival_before'])}",
++        f"- vol direct : {DIRECT_LABELS[draft['direct_flight']]}",
++        f"- fournisseurs exclus : {_suppliers(draft['excluded_suppliers'])}",
++    ]
++    for profile in draft["profiles"]:
++        details = [f"{profile['traveller_count']} voyageur(s)"]
++        if profile["budget_per_person"] is not None:
++            details.append(f"budget {_decimal_euros(profile['budget_per_person'])}")
++        if profile["departure_after"] is not None or profile["departure_before"] is not None:
++            window = _window(profile["departure_after"], profile["departure_before"])
++            details.append(f"départ de l'aller {window}")
++        if profile["return_after"] is not None or profile["return_before"] is not None:
++            details.append(
++                f"départ du retour {_window(profile['return_after'], profile['return_before'])}"
++            )
++        if profile["direct_flight"] is not None:
++            details.append(f"vol direct {DIRECT_LABELS[profile['direct_flight']]}")
++        if profile["excluded_suppliers"]:
++            details.append(f"fournisseurs exclus {_suppliers(profile['excluded_suppliers'])}")
++        lines.append(f"- profil {profile['profile_id']} : " + ", ".join(details))
++    return lines
++
++
+ def _request_lines(draft: Mapping) -> list[str]:
++    if "origin" in draft:  # v2: draft_document shows the route keys of a route request only
++        return _route_request_lines(draft)
+     lines = [
+         f"- destination : {draft['destination']}",
+         f"- voyageurs : {draft['travellers']}",
+@@ -104,7 +157,7 @@
+     """Summary of the understood request, shown before the validation question."""
+     if not isinstance(draft, TravelRequestDraft):
+         raise TypeError("draft must be a TravelRequestDraft")
+-    lines = ["Demande comprise :", *_request_lines(draft.model_dump(mode="json"))]
++    lines = ["Demande comprise :", *_request_lines(draft_document(draft))]
+     return ensure_vocabulary("\n".join(lines) + "\n")
+ 
+ 
+@@ -115,11 +168,25 @@
+     lines = []
+     for offer in proposal.offers:
+         kind = "vol direct" if offer.direct else "avec escale"
+-        lines.append(
+-            f"- {offer.offer_id} : {offer.supplier_id}, {offer.destination}, départ "
+-            f"{offer.departure_date}, arrivée {offer.arrival_date}, {kind}, capacité "
+-            f"{offer.capacity_seats} places"
+-        )
++        if offer.origin is not None:  # v2 package (I4)
++            lines.append(
++                f"- {offer.offer_id} : {offer.supplier_id}, {offer.origin} → {offer.destination}, "
++                f"{TRIP_TYPE_LABELS[offer.trip_type]}, {kind}, capacité {offer.capacity_seats} "
++                "places"
++            )
++            for title, leg in (("aller", offer.outbound), ("retour", offer.return_leg)):
++                if leg is not None:
++                    leg_kind = "vol direct" if leg.direct else "avec escale"
++                    lines.append(
++                        f"  {title} : départ {leg.departure_date}, arrivée {leg.arrival_date}, "
++                        f"{leg_kind}, vol {leg.leg_ref}, {leg.capacity_seats} places"
++                    )
++        else:
++            lines.append(
++                f"- {offer.offer_id} : {offer.supplier_id}, {offer.destination}, départ "
++                f"{offer.departure_date}, arrivée {offer.arrival_date}, {kind}, capacité "
++                f"{offer.capacity_seats} places"
++            )
+         tiers = " ; ".join(
+             f"dès {tier.min_seats} place(s) : {euros(tier.list_per_seat_cents)} par place"
+             for tier in offer.tiers
+@@ -298,6 +365,10 @@
+     status = document["status"]
+     if status == "needs_clarification":
+         text = "Clarification requise. " + needs_clarification_message(document["missing_fields"])
++    elif status == "unknown_place":  # v2 (I4)
++        text = "Clarification requise. " + unknown_place_message(
++            document["fields"], document["known_places"]
++        )
+     elif status == "invalid":
+         text = _invalid_text(document["errors"])
+     elif status == "request_rejected":
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/infrastructure/presentation/vocabulary.py b/Multi-Agent/coalition_travel/infrastructure/presentation/vocabulary.py
+--- a/Multi-Agent/coalition_travel/infrastructure/presentation/vocabulary.py	2026-11-20 04:02:44
++++ b/Multi-Agent/coalition_travel/infrastructure/presentation/vocabulary.py	2026-11-20 05:03:45
+@@ -55,6 +55,8 @@
+     """(path, value) of every free string supplied by the person (D-I3-17)."""
+     if draft.destination is not None:
+         yield "destination", draft.destination
++    if draft.origin is not None:  # route requests (I4)
++        yield "origin", draft.origin
+     for index, supplier in enumerate(draft.excluded_suppliers):
+         yield f"excluded_suppliers[{index}]", supplier
+     for index, profile in enumerate(draft.profiles):
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/plan_trip.py b/Multi-Agent/plan_trip.py
+--- a/Multi-Agent/plan_trip.py	2026-11-20 04:09:58
++++ b/Multi-Agent/plan_trip.py	2026-11-20 05:07:35
+@@ -16,13 +16,19 @@
+ 
+ import argparse
+ import asyncio
++import json
+ import os
+ import re
+ import sys
+ from datetime import date
+ from pathlib import Path
+ 
+-from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.request_contracts import (
++    PROFILE_ROUTE_FIELDS,
++    REQUEST_ROUTE_FIELDS,
++    TravelRequestDraft,
++    is_route_request,
++)
+ from coalition_travel.application.request_understanding import (
+     RequestInputError,
+     understand_request,
+@@ -34,12 +40,18 @@
+     llm_extraction,
+     replay_extraction,
+ )
++from coalition_travel.infrastructure.catalog.places import load_place_directory
+ from coalition_travel.infrastructure.demand.demand_pool import load_demand_pool
+ from coalition_travel.infrastructure.llm.ollama import OllamaStructuredRequestExtractor
+ from coalition_travel.infrastructure.llm.replay import ReplayStructuredRequestExtractor
+ from coalition_travel.infrastructure.negotiation.market import open_simulated_market
+-from coalition_travel.infrastructure.presentation.explanations_fr import CLARIFICATION_QUESTIONS
++from coalition_travel.infrastructure.presentation.explanations_fr import (
++    CLARIFICATION_QUESTIONS,
++    unknown_place_message,
++)
+ from coalition_travel.infrastructure.presentation.json_renderer import (
++    STATUS_SCHEMA,
++    STATUS_SCHEMA_V2,
+     forbidden_term_error,
+     invalid_document,
+     needs_clarification_document,
+@@ -48,6 +60,7 @@
+     render_proposal_json,
+     render_status_json,
+     request_rejected_document,
++    unknown_place_document,
+ )
+ from coalition_travel.infrastructure.presentation.text_renderer import (
+     render_proposal_text,
+@@ -60,6 +73,10 @@
+ ROOT = Path(__file__).resolve().parents[1]
+ CATALOG_PATH = ROOT / "data" / "catalog" / "catalog_v1.json"
+ POOL_PATH = ROOT / "data" / "demand" / "demand_pool_v1.jsonl"
++# Route requests (I4, D-I4-2): catalogue v2, demand pool v2 and the place directory.
++CATALOG_V2_PATH = ROOT / "data" / "catalog" / "catalog_v2.json"
++POOL_V2_PATH = ROOT / "data" / "demand" / "demand_pool_v2.jsonl"
++PLACES_PATH = ROOT / "data" / "catalog" / "places_v1.json"
+ 
+ EXIT_OK = 0
+ EXIT_TECHNICAL = 1
+@@ -125,6 +142,8 @@
+         self.source = "draft-json"
+         self.reference_date: date | None = None
+         self.as_json = False
++        self.route = False  # the version of the request (D-I4-1); decides the documents
++        self._places = None
+ 
+     # --- streams --------------------------------------------------------------------
+ 
+@@ -205,16 +224,55 @@
+         return llm_extraction(extractor.model)
+ 
+     def common(self) -> dict:
+-        return {"source": self.source, "reference_date": self.reference_date}
++        schema = STATUS_SCHEMA_V2 if self.route else STATUS_SCHEMA
++        return {"source": self.source, "reference_date": self.reference_date, "schema": schema}
+ 
++    @property
++    def places(self):
++        if self._places is None:
++            self.remember(PLACES_PATH, PLACES_PATH.name)
++            self._places = load_place_directory(PLACES_PATH)
++        return self._places
++
++    def resolve_places(self, draft):
++        """D-I4-9: canonical names for a route request, or the unknown place fields."""
++        unknown, names = [], {}
++        for field in ("origin", "destination"):
++            spelling = getattr(draft, field)
++            if spelling is None:
++                continue
++            canonical = self.places.resolve(spelling)
++            if canonical is None:
++                unknown.append(field)
++            else:
++                names[field] = canonical
++        if unknown:
++            return None, tuple(unknown)
++        return TravelRequestDraft.model_validate(draft.model_dump(mode="json") | names), ()
++
++    def unknown_place(self, fields):
++        return unknown_place_document(
++            source=self.source,
++            reference_date=self.reference_date,
++            fields=fields,
++            known_places=self.places.names,
++        )
++
+     def from_draft_json(self, draft_bytes):
+         try:
+             draft = TravelRequestDraft.model_validate_json(draft_bytes)
+         except ValidationError as exc:
++            self.route = _raw_is_route(draft_bytes)
+             return invalid_document(errors=reduce_validation_error(exc), **self.common())
++        self.route = is_route_request(draft)
+         refused = self.refuse_forbidden_strings(draft)
+         if refused is not None:
+             return refused
++        if self.route:
++            resolved, unknown = self.resolve_places(draft)
++            if unknown:
++                return self.unknown_place(unknown)
++            draft = resolved
+         validation = validate_request_draft(draft, self.reference_date)
+         if validation.status == "needs_clarification":
+             return needs_clarification_document(
+@@ -242,12 +300,29 @@
+                 result = asyncio.run(understand_request(text, extractor, self.reference_date))
+             except RequestInputError as exc:
+                 return invalid_document(errors=[str(exc)], **self.common())
+-            if result.request is not None:
+-                refused = self.refuse_forbidden_strings(result.request)
++            request = result.request
++            if request is not None:
++                self.route = is_route_request(request)
++                refused = self.refuse_forbidden_strings(request)
+                 if refused is not None:
+                     return refused
++            if request is not None and self.route:
++                resolved, unknown = self.resolve_places(request)
++                if unknown:  # a clarification round that lists the known places
++                    if rounds == MAX_CLARIFICATION_ROUNDS:
++                        return self.unknown_place(unknown)
++                    message = unknown_place_message(unknown, self.places.names)
++                    answer = self.ask(
++                        f"Précision {rounds + 1}/{MAX_CLARIFICATION_ROUNDS} : {message} "
++                    )
++                    if answer == "":
++                        return self.unknown_place(unknown)
++                    text = text + "\n" + answer.rstrip("\n")
++                    rounds += 1
++                    continue
++                request = resolved
+             if result.status == "ready":
+-                return result.request
++                return request
+             if result.status == "invalid":
+                 return invalid_document(errors=result.errors, **self.common())
+             missing = result.missing_fields
+@@ -290,10 +365,6 @@
+     def execute(self, argv) -> int:
+         args = self.parse(argv)
+         draft_bytes, extractor = self.read_inputs(args)
+-        self.remember(CATALOG_PATH, CATALOG_PATH.name)
+-        self.remember(POOL_PATH, POOL_PATH.name)
+-        market = self.open_market(CATALOG_PATH, self.reference_date)
+-        pool = self.load_pool(POOL_PATH)
+         if draft_bytes is not None:
+             obtained = self.from_draft_json(draft_bytes)
+         else:
+@@ -301,6 +372,13 @@
+         if not isinstance(obtained, TravelRequestDraft):
+             return self.finish_with_status(obtained)
+         draft = obtained
++        # D-I4-2: the catalogue and the pool follow the version of the request.
++        catalog_path = CATALOG_V2_PATH if self.route else CATALOG_PATH
++        pool_path = POOL_V2_PATH if self.route else POOL_PATH
++        self.remember(catalog_path, catalog_path.name)
++        self.remember(pool_path, pool_path.name)
++        market = self.open_market(catalog_path, self.reference_date)
++        pool = self.load_pool(pool_path)
+         self.say(render_request_summary(draft))
+         refusal = self.validated(args.yes)
+         if refusal is not None:
+@@ -325,6 +403,23 @@
+         self.stdout.write(output)
+         self.stdout.flush()
+         return EXIT_OK
++
++
++def _raw_is_route(raw: bytes) -> bool:
++    """Version of a draft that failed validation, read from its JSON keys when possible."""
++    try:
++        document = json.loads(raw)
++    except (ValueError, UnicodeDecodeError):
++        return False
++    if not isinstance(document, dict):
++        return False
++    if any(name in document for name in REQUEST_ROUTE_FIELDS):
++        return True
++    profiles = document.get("profiles")
++    return isinstance(profiles, list) and any(
++        isinstance(profile, dict) and any(name in profile for name in PROFILE_ROUTE_FIELDS)
++        for profile in profiles
++    )
+ 
+ 
+ def run(
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/tests/test_i4_route_cli.py b/tests/test_i4_route_cli.py
+--- a/tests/test_i4_route_cli.py	1970-01-01 01:00:00
++++ b/tests/test_i4_route_cli.py	2026-11-20 05:10:37
+@@ -0,0 +1,415 @@
++"""I4-C: route requests through plan_travel_request and the command (Lyon-Alger).
++
++The v1 outputs of the command are compared byte for byte with the outputs produced by
++the code of I3 (SHA-256 recorded at the I3 installation check, before any I4 change).
++"""
++
++import hashlib
++import json
++import os
++import re
++import subprocess
++import sys
++from dataclasses import replace
++from datetime import date
++from pathlib import Path
++
++import pytest
++from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.request_understanding import validate_request_draft
++from coalition_travel.application.travel_workflow import plan_travel_request
++from coalition_travel.application.trip_planning import DemandPoolSnapshot, PlanningRequest
++from coalition_travel.application.trip_proposal import (
++    TRIP_PROPOSAL_SCHEMA_V2,
++    ProposalConsistencyError,
++    contract_field_names,
++    draft_json_extraction,
++)
++from coalition_travel.infrastructure.demand.demand_pool import load_demand_pool
++from coalition_travel.infrastructure.negotiation.market import open_simulated_market
++from coalition_travel.infrastructure.presentation.json_renderer import (
++    STATUS_SCHEMA_V2,
++    StatusDocumentError,
++    render_proposal_json,
++    unknown_place_document,
++    validate_status_document,
++)
++from coalition_travel.infrastructure.presentation.text_renderer import render_proposal_text
++from coalition_travel.infrastructure.presentation.vocabulary import forbidden_words_in
++from p4_support import REFERENCE
++
++ROOT = Path(__file__).resolve().parents[1]
++SCRIPT = ROOT / "Multi-Agent" / "plan_trip.py"
++CATALOG_V2 = ROOT / "data/catalog/catalog_v2.json"
++POOL_V2 = ROOT / "data/demand/demand_pool_v2.jsonl"
++DATE = ["--reference-date", "2026-11-19"]
++HEX64 = re.compile(r"[0-9a-f]{64}")
++E3_FILE = '{"destination": "Tokyo", "travellers": 8, "budget_per_person": "500"}\n'
++# Recorded with the code of I3 (report I3, §16.2), before any I4 change.
++I3_E3_JSON_STDOUT = "8ea8538128440e92de89ca5ac48fb01a04d68637180018d86d4c30316d53ff5c"
++I3_E3_JSON_STDERR = "0295fb1041659e6b55a532720dd84baf077e871ae13be6767874ed4c518a9b19"
++I3_E3_TEXT_STDOUT = "b4e97acc8ee9f455cd86e88cace7a5ee65903838f35c1413f795546a5db59483"
++I3_E3_TEXT_STDERR = "53f161857ea9fd235f9dc371c8962335a80319e74c8803bcc21c6d70b5117456"
++LYON_ALGER = {
++    "origin": "Lyon",
++    "destination": "Alger",
++    "trip_type": "round_trip",
++    "travellers": 2,
++    "budget_per_person": "500",
++    "departure_after": "2027-02-15",
++    "departure_before": "2027-02-15",
++    "return_after": "2027-02-25",
++    "return_before": "2027-02-25",
++}
++
++
++def environment():
++    env = {k: v for k, v in os.environ.items() if not k.startswith("OLLAMA_")}
++    return env | {"PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8"}
++
++
++def cli(tmp_path, *args, stdin=""):
++    return subprocess.run(
++        [sys.executable, "-B", str(SCRIPT), *map(str, args)],
++        input=stdin.encode("utf-8"),
++        capture_output=True,
++        cwd=tmp_path,
++        env=environment(),
++        timeout=180,
++        check=False,
++    )
++
++
++def write(tmp_path, name, content):
++    path = tmp_path / name
++    path.write_text(content if isinstance(content, str) else json.dumps(content), "utf-8")
++    return path
++
++
++def sha(data: bytes) -> str:
++    return hashlib.sha256(data).hexdigest()
++
++
++def status(result):
++    document = json.loads(result.stdout)
++    assert validate_status_document(document) == result.returncode
++    return document
++
++
++# --- K1 on the outputs: v1 requests produce the bytes of I3 --------------------------------
++
++
++def test_v1_outputs_of_the_command_are_the_bytes_of_i3(tmp_path):
++    path = write(tmp_path, "e3.json", E3_FILE)
++    as_json = cli(tmp_path, "--draft-json", path, *DATE, "--yes", "--json")
++    assert as_json.returncode == 0
++    assert sha(as_json.stdout) == I3_E3_JSON_STDOUT
++    assert sha(as_json.stderr) == I3_E3_JSON_STDERR
++    as_text = cli(tmp_path, "--draft-json", path, *DATE, stdin="o\n")
++    assert as_text.returncode == 0
++    assert sha(as_text.stdout) == I3_E3_TEXT_STDOUT
++    assert sha(as_text.stderr) == I3_E3_TEXT_STDERR
++
++
++def test_v1_status_documents_keep_the_v1_schema(tmp_path):
++    path = write(tmp_path, "d.json", {"destination": "Tokyo", "travellers": 2})
++    result = cli(tmp_path, "--draft-json", path, *DATE, "--json")
++    assert status(result)["schema"] == "trip-request-status-v1"
++    malformed = write(tmp_path, "m.json", {"destination": "Tokyo", "travellers": "deux"})
++    assert status(cli(tmp_path, "--draft-json", malformed, *DATE, "--json"))["schema"] == (
++        "trip-request-status-v1"
++    )
++
++
++# --- I4-A1: Lyon-Alger end to end ------------------------------------------------------------
++
++
++@pytest.fixture(scope="module")
++def lyon_alger(tmp_path_factory):
++    tmp_path = tmp_path_factory.mktemp("lyon_alger")
++    path = write(tmp_path, "lyon_alger.json", LYON_ALGER | {"destination": "Algiers"})
++    as_json = cli(tmp_path, "--draft-json", path, *DATE, "--yes", "--json")
++    as_text = cli(tmp_path, "--draft-json", path, *DATE, stdin="o\n")
++    assert as_json.returncode == 0 and as_text.returncode == 0, as_json.stderr
++    return tmp_path, path, as_json, as_text
++
++
++def test_lyon_alger_produces_a_complete_v2_proposal(lyon_alger):
++    _, _, as_json, _ = lyon_alger
++    data = json.loads(as_json.stdout)
++    assert data["schema"] == TRIP_PROPOSAL_SCHEMA_V2
++    assert data["request"]["draft"]["destination"] == "Alger"  # Algiers, resolved (D-I4-9)
++    assert (data["unit"]["origin_key"], data["unit"]["trip_type"]) == ("lyon", "round_trip")
++    provenance = data["provenance"]
++    assert (provenance["catalog_version"], provenance["pool_version"]) == (
++        "catalog-v2",
++        "demand-pool-v2",
++    )
++    assert data["status"]["code"] in {
++        "served_in_coalition",
++        "alone_no_beneficial_coalition",
++        "alone_social_optimum",
++    }
++    assert data["block"] is not None and data["allocation"] is not None
++    offers = {offer["offer_id"]: offer for offer in data["offers"]}
++    assert offers["lys-alg-vlt-20270215"]["return"] is None
++    assert offers["lys-alg-brs-20270215"]["outbound"]["leg_ref"] == "BRS-311-20270215"
++    reasons = {
++        offer_id: [v["reason"] for v in offer["violations"]] for offer_id, offer in offers.items()
++    }
++    assert reasons == {
++        "lys-alg-brs-20270215": [],
++        "lys-alg-clq-20270215": [],
++        "lys-alg-orv-20270215": ["return_after_window"],
++        "lys-alg-vlt-20270215": ["trip_type_mismatch"],
++        "mrs-alg-orv-20270215": ["origin_mismatch"],
++    }
++
++
++def test_lyon_alger_outputs_are_closed_clean_and_deterministic(lyon_alger):
++    tmp_path, path, as_json, as_text = lyon_alger
++    data = json.loads(as_json.stdout)
++    draft_keys = set(TravelRequestDraft.model_fields) | {"profile_id", "traveller_count"}
++    allowed = contract_field_names(TRIP_PROPOSAL_SCHEMA_V2) | {"message"} | draft_keys
++
++    def keys(node):
++        if isinstance(node, dict):
++            for key, value in node.items():
++                yield key
++                yield from keys(value)
++        elif isinstance(node, list):
++            for value in node:
++                yield from keys(value)
++
++    assert set(keys(data)) <= allowed
++    for text in (as_json.stdout, as_text.stdout, as_json.stderr, as_text.stderr):
++        decoded = text.decode("utf-8")
++        assert not HEX64.search(decoded) and not forbidden_words_in(decoded)
++        assert str(tmp_path) not in decoded
++    again = cli(tmp_path, "--draft-json", path, *DATE, "--yes", "--json")
++    assert again.stdout == as_json.stdout
++    summary = as_text.stderr.decode("utf-8")
++    assert "- départ de : Lyon\n- destination : Alger\n- type de trajet : aller-retour" in summary
++    assert "Algiers" not in summary
++    assert "retour : départ 2027-02-25" in as_text.stdout.decode("utf-8")
++
++
++def test_v2_contract_field_names_extend_v1():
++    v1, v2 = contract_field_names(), contract_field_names(TRIP_PROPOSAL_SCHEMA_V2)
++    assert len(v1) == 107
++    assert v2 - v1 == {"origin_key", "trip_type", "origin", "outbound", "return", "leg_ref"}
++
++
++# --- unknown places (D-I4-9) ----------------------------------------------------------------
++
++
++def test_an_unknown_place_by_draft_json_is_exit_2(tmp_path):
++    path = write(tmp_path, "oran.json", LYON_ALGER | {"destination": "Oran"})
++    result = cli(tmp_path, "--draft-json", path, *DATE, "--json")
++    assert result.returncode == 2
++    document = status(result)
++    assert document == {
++        "fields": ["destination"],
++        "known_places": ["Alger", "Lyon", "Marseille"],
++        "reference_date": "2026-11-19",
++        "schema": "trip-request-status-v2",
++        "source": "draft-json",
++        "status": "unknown_place",
++    }
++    assert "oran" not in (result.stdout + result.stderr).decode("utf-8").casefold()
++    assert "Lieux disponibles : Alger, Lyon, Marseille." in result.stderr.decode("utf-8")
++
++
++def test_an_unknown_place_is_clarified_then_resolved(tmp_path):
++    replay = write(tmp_path, "r.json", [LYON_ALGER | {"destination": "Oran"}, LYON_ALGER])
++    result = cli(tmp_path, "--extractor-replay", replay, *DATE, stdin="voyage\nAlger\no\n")
++    assert result.returncode == 0, result.stderr
++    stderr = result.stderr.decode("utf-8")
++    assert "Précision 1/3 : Lieu non reconnu pour la destination." in stderr
++    assert "oran" not in stderr.casefold()
++
++
++def test_end_of_input_on_an_unknown_place_is_exit_2(tmp_path):
++    replay = write(tmp_path, "r.json", [LYON_ALGER | {"origin": "Paris"}])
++    result = cli(tmp_path, "--extractor-replay", replay, *DATE, "--json", stdin="voyage\n")
++    assert result.returncode == 2
++    assert status(result)["fields"] == ["origin"]
++
++
++# --- route clarification and status documents v2 ------------------------------------------
++
++
++def test_route_fields_are_asked_one_round_at_a_time(tmp_path):
++    missing = {key: value for key, value in LYON_ALGER.items() if key != "travellers"}
++    replay = write(tmp_path, "r.json", [missing, LYON_ALGER])
++    result = cli(tmp_path, "--extractor-replay", replay, *DATE, stdin="voyage\ndeux\no\n")
++    assert result.returncode == 0
++    assert "Précision 1/3 : Combien de personnes voyagent ?" in result.stderr.decode("utf-8")
++
++
++def test_v2_status_documents_by_the_command(tmp_path):
++    cases = {
++        "missing": ({"origin": "Lyon", "destination": "Alger", "travellers": 2}, 2),
++        "empty window": (LYON_ALGER | {"departure_after": "2027-02-16"}, 3),
++        "malformed": (LYON_ALGER | {"travellers": "deux"}, 3),
++        "budget": (LYON_ALGER | {"budget_per_person": "0.001"}, 3),
++        "forbidden": (LYON_ALGER | {"origin": "Billet Ville"}, 3),
++    }
++    documents = {}
++    for name, (draft, code) in cases.items():
++        result = cli(
++            tmp_path, "--draft-json", write(tmp_path, "d.json", draft), *DATE, "--yes", "--json"
++        )
++        assert result.returncode == code, name
++        documents[name] = status(result)
++        assert documents[name]["schema"] == STATUS_SCHEMA_V2, name
++    assert documents["missing"]["missing_fields"] == [
++        "budget_per_person",
++        "trip_type",
++        "departure_after",
++        "departure_before",
++    ]
++    assert documents["empty window"]["errors"] == [
++        "departure_after must not be after departure_before"
++    ]
++    assert documents["malformed"]["errors"] == ["travellers: int_type"]
++    assert (documents["budget"]["status"], documents["budget"]["reason"]) == (
++        "request_rejected",
++        "budget_below_one_cent",
++    )
++    assert documents["forbidden"]["errors"] == ["forbidden_term: origin"]
++    refused = cli(
++        tmp_path,
++        "--draft-json",
++        write(tmp_path, "d.json", LYON_ALGER),
++        *DATE,
++        "--json",
++        stdin="non\n",
++    )
++    assert refused.returncode == 4 and status(refused)["schema"] == STATUS_SCHEMA_V2
++
++
++def test_v2_status_validator_negative_cases():
++    base = unknown_place_document(
++        source="draft-json",
++        reference_date=REFERENCE,
++        fields=["origin", "destination"],
++        known_places=["Alger", "Lyon", "Marseille"],
++    )
++    assert validate_status_document(base) == 2
++    refused = [
++        base | {"fields": ["destination", "origin"]},
++        base | {"fields": []},
++        base | {"known_places": ["Lyon", "Alger"]},
++        base | {"known_places": ["Alger", "Alger"]},
++        base | {"extra": 1},
++        base | {"schema": "trip-request-status-v1"},  # unknown_place is v2 only
++        base | {"status": ["unknown_place"]},  # unhashable, refused cleanly
++        {
++            "schema": STATUS_SCHEMA_V2,
++            "status": "invalid",
++            "source": "llm",
++            "reference_date": "2026-11-19",
++            "errors": ["the return window is empty"],  # a profile form without its prefix
++        },
++        {
++            "schema": STATUS_SCHEMA_V2,
++            "status": "needs_clarification",
++            "source": "llm",
++            "reference_date": "2026-11-19",
++            "missing_fields": ["trip_type", "origin"],
++            "rounds": 1,
++        },
++    ]
++    for document in refused:
++        with pytest.raises(StatusDocumentError):
++            validate_status_document(document)
++
++
++# --- plan_travel_request on a route request, and T-CONF in v2 -------------------------------
++
++
++def variant(pool, budget, request_id="pool-lys-alg-01"):
++    requests = tuple(
++        PlanningRequest(
++            item.request_id,
++            TravelRequestDraft.model_validate(
++                item.draft.model_dump(mode="json") | {"budget_per_person": budget}
++            ),
++        )
++        if item.request_id == request_id
++        else item
++        for item in pool.requests
++    )
++    digest = hashlib.sha256(budget.encode()).hexdigest()
++    return DemandPoolSnapshot(pool.version, digest, pool.catalog_version, requests)
++
++
++def plan_v2(pool):
++    draft = TravelRequestDraft.model_validate(LYON_ALGER)
++    return plan_travel_request(
++        draft,
++        market=open_simulated_market(CATALOG_V2, REFERENCE),
++        pool=pool,
++        reference_date=REFERENCE,
++        extraction=draft_json_extraction(),
++    )
++
++
++def test_t_conf_1_in_v2_a_member_budget_does_not_reach_the_outputs():
++    pool = load_demand_pool(POOL_V2)
++    a, b = plan_v2(variant(pool, "340.00")), plan_v2(variant(pool, "340.37"))
++    block = next(x for x in a.plan.formation.blocks if "user" in x.unit_ids)
++    assert "pool-lys-alg-01" in block.unit_ids  # otherwise the test would prove nothing
++    assert a.proposal == b.proposal
++    assert render_proposal_json(a.proposal) == render_proposal_json(b.proposal)
++    assert render_proposal_text(a.proposal) == render_proposal_text(b.proposal)
++    assert a.plan.pool_sha256 != b.plan.pool_sha256
++    assert a.plan.allocation.allocation_sha256 != b.plan.allocation.allocation_sha256
++
++
++def test_a_v1_proposal_never_carries_route_fields():
++    result = plan_v2(load_demand_pool(POOL_V2))
++    proposal = result.proposal
++    with pytest.raises(ProposalConsistencyError):
++        replace(proposal, schema="trip-proposal-v1")
++    assert proposal.schema == TRIP_PROPOSAL_SCHEMA_V2
++
++
++# --- extraction dataset v3 and prompt v2 -----------------------------------------------------
++
++
++def test_the_v3_dataset_is_valid_offline_and_labels_match_the_validation():
++    dataset = ROOT / "data/eval/request_extraction_v3.jsonl"
++    completed = subprocess.run(
++        [
++            sys.executable,
++            "-B",
++            str(ROOT / "Multi-Agent/evaluate_requests.py"),
++            "--validate-only",
++            "--dataset",
++            str(dataset),
++        ],
++        capture_output=True,
++        text=True,
++        env=environment(),
++        timeout=120,
++        check=False,
++    )
++    assert completed.returncode == 0, completed.stderr
++    assert json.loads(completed.stdout)["examples"] == 8
++    for line in dataset.read_text("utf-8").splitlines():
++        record = json.loads(line)
++        draft = TravelRequestDraft.model_validate(record["expected"])
++        result = validate_request_draft(draft, date.fromisoformat(record["reference_date"]))
++        assert result.status == record["expected_status"], record["id"]
++    manifest = json.loads(
++        (ROOT / "data/eval/request_extraction_v3.manifest.json").read_text("utf-8")
++    )
++    assert manifest["records"] == 8
++
++
++def test_the_prompt_is_versioned_v2():
++    from coalition_travel.infrastructure.llm.ollama import EXTRACTION_PROMPT_VERSION
++
++    assert EXTRACTION_PROMPT_VERSION == "travel-request-extraction-v2"
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/tests/test_ollama_adapter.py b/tests/test_ollama_adapter.py
+--- a/tests/test_ollama_adapter.py	2026-11-19 02:04:43
++++ b/tests/test_ollama_adapter.py	2026-11-20 05:08:42
+@@ -81,7 +81,7 @@
+ 
+     asyncio.run(extractor.extract("One person to Tokyo, 500 EUR", date(2026, 1, 1)))
+ 
+-    assert extractor.prompt_version == "travel-request-extraction-v1"
++    assert extractor.prompt_version == "travel-request-extraction-v2"  # I4, D-I4-12
+     assert extractor.inference_parameters == {"temperature": 0.15, "stream": False, "seed": 71}
+     assert received["body"]["options"] == {"temperature": 0.15, "seed": 71}
+ 
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/tests/test_presentation.py b/tests/test_presentation.py
+--- a/tests/test_presentation.py	2026-11-20 04:07:49
++++ b/tests/test_presentation.py	2026-11-20 05:04:43
+@@ -615,7 +615,7 @@
+         base | {"extra": 1},
+         {key: value for key, value in base.items() if key != "errors"},
+         base | {"errors": None},
+-        base | {"schema": "trip-request-status-v2"},
++        base | {"schema": "trip-request-status-v9"},  # I4: v2 now exists
+         base | {"source": "file"},
+         base | {"reference_date": "19/11/2026"},
+         invalid_document(source="llm", reference_date=REFERENCE, errors=["something went wrong"]),
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/tests/test_trip_proposal.py b/tests/test_trip_proposal.py
+--- a/tests/test_trip_proposal.py	2026-11-20 04:02:27
++++ b/tests/test_trip_proposal.py	2026-11-20 05:03:17
+@@ -20,7 +20,7 @@
+ 
+ import pytest
+ from coalition_travel.application.coalition_candidates import FormationLimits
+-from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.request_contracts import TravelRequestDraft, draft_document
+ from coalition_travel.application.savings_allocation import UnallocatedUnit
+ from coalition_travel.application.trip_planning import (
+     DemandPoolSnapshot,
+@@ -161,7 +161,7 @@
+ def frozen_dump(item):
+     return {
+         key: tuple(value) if isinstance(value, list) else value
+-        for key, value in item.model_dump(mode="json").items()
++        for key, value in draft_document(item).items()  # I4: the published draft (v1 keys)
+     }
+ 
+ 
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/data/eval/request_extraction_v3.jsonl b/data/eval/request_extraction_v3.jsonl
+--- a/data/eval/request_extraction_v3.jsonl	1970-01-01 01:00:00
++++ b/data/eval/request_extraction_v3.jsonl	2026-11-20 05:09:10
+@@ -0,0 +1,8 @@
++{"id":"fr-lyon-alger-reference","reference_date":"2026-11-19","case_type":"route_reference","expected_status":"ready","text":"Je veux voyager de Lyon à Alger pour 2 personnes, départ le 15 février 2027, retour le 25 février 2027, avec un budget de 500 euros par personne.","expected":{"origin":"Lyon","destination":"Alger","trip_type":"round_trip","travellers":2,"budget_per_person":"500","currency":"EUR","departure_after":"2027-02-15","departure_before":"2027-02-15","return_after":"2027-02-25","return_before":"2027-02-25","direct_flight":"any","excluded_suppliers":[]}}
++{"id":"fr-lyon-alger-sans-nombre","reference_date":"2026-11-19","case_type":"route_clarification","expected_status":"needs_clarification","text":"Je veux voyager de Lyon à Alger, départ le 15 février 2027, retour le 25 février 2027, avec un budget de 500 euros par personne.","expected":{"origin":"Lyon","destination":"Alger","trip_type":"round_trip","budget_per_person":"500","currency":"EUR","departure_after":"2027-02-15","departure_before":"2027-02-15","return_after":"2027-02-25","return_before":"2027-02-25","direct_flight":"any","excluded_suppliers":[]},"annotation":"The number of travellers is not stated: the clarification asks for it."}
++{"id":"en-lyon-algiers-alias","reference_date":"2026-11-19","case_type":"route_alias","expected_status":"ready","text":"Two people from Lyon to Algiers, round trip, leaving on 15 February 2027 and coming back on 25 February 2027, 500 EUR each.","expected":{"origin":"Lyon","destination":"Algiers","trip_type":"round_trip","travellers":2,"budget_per_person":"500","currency":"EUR","departure_after":"2027-02-15","departure_before":"2027-02-15","return_after":"2027-02-25","return_before":"2027-02-25","direct_flight":"any","excluded_suppliers":[]},"annotation":"The place name is copied as written; the application resolves Algiers to Alger through places-v1."}
++{"id":"fr-lyon-oran-lieu-inconnu","reference_date":"2026-11-19","case_type":"route_unknown_place","expected_status":"ready","text":"Aller-retour de Lyon à Oran pour 2 personnes, départ le 15 février 2027, retour le 25 février 2027, 500 euros par personne.","expected":{"origin":"Lyon","destination":"Oran","trip_type":"round_trip","travellers":2,"budget_per_person":"500","currency":"EUR","departure_after":"2027-02-15","departure_before":"2027-02-15","return_after":"2027-02-25","return_before":"2027-02-25","direct_flight":"any","excluded_suppliers":[]},"annotation":"Valid for the deterministic validation; Oran is not in places-v1, so the application asks for another place (unknown_place)."}
++{"id":"fr-lyon-alger-aller-simple","reference_date":"2026-11-19","case_type":"route_one_way","expected_status":"ready","text":"Un aller simple de Lyon à Alger le 15 février 2027 pour 3 personnes, 200 euros chacune.","expected":{"origin":"Lyon","destination":"Alger","trip_type":"one_way","travellers":3,"budget_per_person":"200","currency":"EUR","departure_after":"2027-02-15","departure_before":"2027-02-15","direct_flight":"any","excluded_suppliers":[]}}
++{"id":"fr-lyon-alger-mois","reference_date":"2026-11-19","case_type":"route_month_window","expected_status":"ready","text":"Aller-retour Lyon-Alger en février 2027 pour 2 personnes, 450 euros par personne, retour en mars 2027.","expected":{"origin":"Lyon","destination":"Alger","trip_type":"round_trip","travellers":2,"budget_per_person":"450","currency":"EUR","departure_after":"2027-02-01","departure_before":"2027-02-28","return_after":"2027-03-01","return_before":"2027-03-31","direct_flight":"any","excluded_suppliers":[]},"annotation":"A month gives its first and last day."}
++{"id":"fr-tokyo-v1","reference_date":"2026-11-19","case_type":"v1_unchanged","expected_status":"ready","text":"Nous sommes deux et cherchons un voyage à Tokyo. Budget maximum 500 euros par personne.","expected":{"destination":"Tokyo","travellers":2,"budget_per_person":"500.00","currency":"EUR","direct_flight":"any","excluded_suppliers":[]},"annotation":"No route is stated: the request stays a v1 request and follows the v1 path."}
++{"id":"en-rome-v1","reference_date":"2026-11-19","case_type":"v1_unchanged","expected_status":"ready","text":"Three travellers to Rome, no more than 420 EUR each. A direct flight is preferred.","expected":{"destination":"Rome","travellers":3,"budget_per_person":"420","currency":"EUR","direct_flight":"preferred","excluded_suppliers":[]}}
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/data/eval/request_extraction_v3.manifest.json b/data/eval/request_extraction_v3.manifest.json
+--- a/data/eval/request_extraction_v3.manifest.json	1970-01-01 01:00:00
++++ b/data/eval/request_extraction_v3.manifest.json	2026-11-20 05:09:10
+@@ -0,0 +1,12 @@
++{
++  "version": "request-extraction-v3",
++  "synthetic": true,
++  "records": 8,
++  "format": "JSONL: id, case_type, reference_date, text, expected TravelRequestDraft (with the route fields of I4), expected_status; optional annotation",
++  "status_policy": "expected_status is the reviewed label ready, needs_clarification or invalid of the deterministic validation; place resolution (places-v1) is applied afterwards by the application and is not part of this label",
++  "limitations": [
++    "Synthetic cases are not representative of real traveller traffic.",
++    "Written for prompt travel-request-extraction-v2; it is only validated in I4 (--validate-only) and measured against Ollama in I5.",
++    "Exact match is intentionally strict; a valid Pydantic response may still be semantically wrong."
++  ]
++}

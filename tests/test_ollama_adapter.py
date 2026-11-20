@@ -15,8 +15,14 @@ from coalition_travel.domain.request import TravelRequestDraft
 from coalition_travel.infrastructure.llm.ollama import (
     LLMProviderError,
     OllamaStructuredRequestExtractor,
+    transport_schema,
 )
-from evaluate_requests import DEFAULT_DATASET, evaluate, load_dataset
+from evaluate_requests import (
+    DEFAULT_DATASET,
+    evaluate,
+    load_dataset,
+    load_profile_dataset,
+)
 from pydantic import ValidationError
 
 
@@ -56,11 +62,29 @@ def test_ollama_adapter_sends_json_schema_and_validates_response(monkeypatch):
     assert result.destination == "Tokyo"
     assert result.arrival_before == date(2027, 2, 20)
     assert received["url"] == "http://localhost:11434/api/chat"
-    assert received["body"]["format"] == TravelRequestDraft.model_json_schema()
+    assert received["body"]["format"] == transport_schema()  # final mission: all keys required
     assert received["body"]["options"]["temperature"] == 0
     assert received["body"]["stream"] is False
     assert reference_date.isoformat() in received["body"]["messages"][1]["content"]
     assert received["timeout"] == 12
+
+
+def test_ollama_adapter_records_and_sends_reproducibility_parameters(monkeypatch):
+    received = {}
+    output = json.dumps({"destination": "Tokyo", "travellers": 1, "budget_per_person": "500"})
+
+    def fake_urlopen(request, timeout):
+        received["body"] = json.loads(request.data)
+        return _http_response(output)
+
+    monkeypatch.setattr("coalition_travel.infrastructure.llm.ollama.urlopen", fake_urlopen)
+    extractor = OllamaStructuredRequestExtractor("qwen-local", temperature=0.15, seed=71)
+
+    asyncio.run(extractor.extract("One person to Tokyo, 500 EUR", date(2026, 1, 1)))
+
+    assert extractor.prompt_version == "travel-request-extraction-v2"  # I4, D-I4-12
+    assert extractor.inference_parameters == {"temperature": 0.15, "stream": False, "seed": 71}
+    assert received["body"]["options"] == {"temperature": 0.15, "seed": 71}
 
 
 def test_ollama_adapter_includes_retrieved_context_with_source_references(monkeypatch):
@@ -125,9 +149,16 @@ def test_end_to_end_request_understanding_returns_validated_result_and_provider_
 def test_synthetic_evaluation_dataset_has_valid_annotated_records():
     records = load_dataset(DEFAULT_DATASET)
 
-    assert len(records) == 8
+    assert len(records) == 26
     assert len({record["id"] for record in records}) == len(records)
     assert all(isinstance(record["expected"], TravelRequestDraft) for record in records)
+
+
+def test_profile_dataset_is_versioned_and_profiles_are_scored_without_ids_or_order():
+    records = load_profile_dataset(DEFAULT_DATASET.parent / "request_profiles_v1.jsonl")
+
+    assert len(records) == 7
+    assert records[0]["expected"].profiles[0].traveller_count == 2
 
 
 def test_evaluation_reports_provider_failures_and_attempt_latency():
@@ -144,6 +175,8 @@ def test_evaluation_reports_provider_failures_and_attempt_latency():
     assert result["failed_calls"] == 1
     assert result["mean_latency_ms"] is not None
     assert result["errors"] == [{"id": "fr-basic", "error": "LLMProviderError"}]
+    assert result["examples"][0]["actual_status"] == "extraction_error"
+    assert "status_confusion_matrix" in result
 
 
 def test_evaluation_continues_after_typed_extraction_error():
@@ -273,3 +306,26 @@ def test_ollama_adapter_limits_input_size():
 
     with pytest.raises(RequestInputError, match="exceeds"):
         asyncio.run(extractor.extract("six chars", date(2026, 1, 1)))
+
+
+def test_the_transport_schema_requires_every_key_and_changes_nothing_else():
+    """Final mission: without required keys, constrained decoding let models omit fields."""
+    pydantic_schema = TravelRequestDraft.model_json_schema()
+    sent = transport_schema()
+    assert sent["required"] == list(sent["properties"])
+    for name, node in sent["$defs"].items():
+        if node.get("type") == "object":
+            assert node["required"] == list(node["properties"]), name
+
+    def without_required(schema):
+        stripped = {key: value for key, value in schema.items() if key != "required"}
+        stripped["$defs"] = {
+            name: {key: value for key, value in node.items() if key != "required"}
+            for name, node in schema["$defs"].items()
+        }
+        return stripped
+
+    assert without_required(sent) == without_required(pydantic_schema)
+    assert "required" not in pydantic_schema  # the Pydantic model itself is unchanged
+    for name, node in pydantic_schema["$defs"].items():  # existing requirements are kept
+        assert set(node.get("required", ())) <= set(sent["$defs"][name]["required"])

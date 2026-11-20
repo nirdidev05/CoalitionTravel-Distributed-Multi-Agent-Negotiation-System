@@ -19,6 +19,8 @@ dev = ["pytest>=8,<10", "ruff>=0.11,<1"]
 [project.scripts]
 coalition-travel = "Entry:run_scenarios"
 coalition-travel-eval = "evaluate_requests:main"
+coalition-travel-eval-rag = "evaluate_retrieval:main"
+coalition-travel-plan = "plan_trip:main"
 
 [tool.setuptools]
 package-dir = {"" = "Multi-Agent"}
@@ -29,9 +31,11 @@ py-modules = [
     "CoalitionStructureSearch",
     "Entry",
     "evaluate_requests",
+    "evaluate_retrieval",
     "Leader",
     "Message",
     "Negotiation",
+    "plan_trip",
     "SellerAgent",
 ]
 

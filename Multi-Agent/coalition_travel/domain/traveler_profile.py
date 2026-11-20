@@ -16,6 +16,14 @@ class TravelerProfile:
     arrival_before: date | None = None
     direct_flight: Literal["required", "preferred", "any"] = "any"
     excluded_suppliers: tuple[str, ...] = ()
+    # Effective route windows of a v2 request (I4); always None on the v1 path.
+    departure_before: date | None = None
+    return_after: date | None = None
+    return_before: date | None = None
+
+    @property
+    def route_windows(self) -> tuple[date | None, date | None, date | None]:
+        return (self.departure_before, self.return_after, self.return_before)
 
     def __post_init__(self):
         if not self.profile_id.strip() or not self.destination.strip():

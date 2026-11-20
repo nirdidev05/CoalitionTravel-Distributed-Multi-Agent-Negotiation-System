@@ -3,7 +3,8 @@
 from dataclasses import dataclass
 from time import perf_counter
 
-from CoalitionStructureSearch import brute_force_search, idp_search, validate_partition
+from coalition_travel.domain.partition import validate_partition
+from coalition_travel.domain.partition_optimization import brute_force_search, idp_search
 
 
 @dataclass(frozen=True)

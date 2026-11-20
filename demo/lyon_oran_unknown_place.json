@@ -1,0 +1,11 @@
+{
+  "origin": "Lyon",
+  "destination": "Oran",
+  "trip_type": "round_trip",
+  "travellers": 2,
+  "budget_per_person": "500",
+  "departure_after": "2027-02-15",
+  "departure_before": "2027-02-15",
+  "return_after": "2027-02-25",
+  "return_before": "2027-02-25"
+}

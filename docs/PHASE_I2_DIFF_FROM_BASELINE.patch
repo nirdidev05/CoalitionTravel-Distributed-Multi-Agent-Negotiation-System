@@ -1,0 +1,2067 @@
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/application/savings_allocation.py b/Multi-Agent/coalition_travel/application/savings_allocation.py
+--- a/Multi-Agent/coalition_travel/application/savings_allocation.py	1970-01-01 01:00:00
++++ b/Multi-Agent/coalition_travel/application/savings_allocation.py	2026-11-19 18:28:59
+@@ -0,0 +1,494 @@
++"""P5: allocation of the savings of every formed block (plan 3H/P5, step I2).
++
++Inputs are the P4 ``FormationResult`` (blocks and component games) and the lot's
++``TravelUnit`` budgets. No oracle is ever called: every value comes from the games P4
++already built (specification §9.2), checked by the preconditions below.
++
++Per non-singleton block C (scope review I2, §3.3):
++
++1. v*|C from ``CoverCache`` (restriction of a cached component cover when available);
++2. phi = exact Shapley value of v*|C, with phi >= 0 and sum phi = v(C) checked;
++3. y = projection of phi onto [0, ref_u] (theta = 0, addendum ID-6), with lambda*;
++4. y' = largest remainder in cents (ties by unit_id), x'_u = ref_u - y'_u;
++5. traveller shares: equal awards under per-seat budgets, then largest remainder per
++   seat (ties by profile_id, then seat rank);
++6. diagnostics: projection activity, distances, rounding gap, maximum core excess.
++
++A singleton pays its reference (phi = 0). Units without a block (unserved or unresolved)
++are listed in ``unallocated`` with their reason and never receive a fictitious amount.
++The invariants of §3.5 are checked on every run. The official computation never uses the
++historical float Shapley value (``CoalitionStructureSearch.shapley_value``); that function
++is a test-only differential oracle.
++"""
++
++import hashlib
++import json
++from collections.abc import Iterable
++from dataclasses import dataclass
++from fractions import Fraction
++from itertools import combinations
++from time import perf_counter
++
++from coalition_travel.application.coalition_formation import FormationResult, FormedBlock
++from coalition_travel.domain.coalition_game import Coalition, CoalitionGame, canonical_coalition
++from coalition_travel.domain.savings_allocation import (
++    constrained_equal_awards,
++    max_core_excess,
++    max_distance,
++    project_onto_bounds,
++    round_largest_remainder,
++    shapley_exact,
++    squared_distance,
++    values_by_mask,
++)
++from coalition_travel.domain.travel_unit import TravelUnit
++
++ALLOCATION_VERSION = "p5-allocation-v1"
++THETA_CENTS = 0  # ID-6, docs/PHASE_P5_ADDENDUM_ID6.md
++SUBSTEPS = ("cover", "shapley", "projection", "rounding", "core_excess", "traveler_split")
++
++
++class AllocationPreconditionError(RuntimeError):
++    """The formation does not provide what P5 needs (scope review I2, §3.2)."""
++
++
++class AllocationConsistencyError(RuntimeError):
++    """An allocation invariant (scope review I2, §3.5) does not hold."""
++
++
++# --- cover cache --------------------------------------------------------------------------
++
++
++class CoverCache:
++    """v* tables for one allocation run, keyed by (component_id, subset).
++
++    Restriction lemma: for S ⊆ block ⊆ component, v* computed on the component and v*
++    computed on the block agree on S, because v*(S) depends on F ∩ 2^S only. A block
++    cover is therefore read from a cached component cover when one exists.
++    """
++
++    def __init__(self):
++        self._covers: dict[tuple[str, Coalition], dict[Coalition, int]] = {}
++        self._games: dict[str, tuple] = {}
++        self.computed = 0
++        self.reused = 0
++        self.masks_visited = 0
++
++    def _check_game(self, game: CoalitionGame) -> None:
++        known = self._games.setdefault(game.component_id, game.values)
++        if known != game.values:
++            raise AllocationConsistencyError("a CoverCache must not be reused across games")
++
++    def _compute(self, game: CoalitionGame, subset: Coalition) -> dict[Coalition, int]:
++        cover = game.cover_values(subset)
++        self.computed += 1
++        self.masks_visited += (1 << len(subset)) - 1
++        self._covers[(game.component_id, subset)] = cover
++        return cover
++
++    def component_cover(self, game: CoalitionGame) -> dict[Coalition, int]:
++        self._check_game(game)
++        key = (game.component_id, game.players)
++        if key in self._covers:
++            self.reused += 1
++            return self._covers[key]
++        return self._compute(game, game.players)
++
++    def block_cover(self, game: CoalitionGame, block: Iterable[str]) -> dict[Coalition, int]:
++        self._check_game(game)
++        members = canonical_coalition(block)
++        key = (game.component_id, members)
++        if key in self._covers:
++            self.reused += 1
++            return self._covers[key]
++        full = self._covers.get((game.component_id, game.players))
++        if full is not None:
++            allowed = set(members)
++            restricted = {S: value for S, value in full.items() if set(S) <= allowed}
++            self._covers[key] = restricted
++            self.reused += 1
++            return restricted
++        return self._compute(game, members)
++
++
++# --- results ------------------------------------------------------------------------------
++
++
++@dataclass(frozen=True)
++class BlockAllocation:
++    unit_ids: tuple[str, ...]
++    offer_id: str
++    cost_cents: int
++    value_cents: int
++    references_cents: tuple[tuple[str, int], ...]
++    phi: tuple[tuple[str, Fraction], ...]
++    y: tuple[tuple[str, Fraction], ...]
++    y_rounded: tuple[tuple[str, int], ...]
++    payments_cents: tuple[tuple[str, int], ...]
++    projection_active: bool
++    saturated_unit_ids: tuple[str, ...]
++    lambda_star: Fraction
++    distance_squared: Fraction
++    distance_max: Fraction
++    rounding_gap: Fraction
++    max_core_excess: Fraction | None
++
++    def payment(self, unit_id: str) -> int:
++        return dict(self.payments_cents)[unit_id]
++
++
++@dataclass(frozen=True)
++class TravelerShare:
++    unit_id: str
++    profile_id: str
++    seat_rank: int
++    budget_cents: int
++    amount_cents: int
++    profile_saturated: bool
++    unit_tau: Fraction
++
++
++@dataclass(frozen=True)
++class UnallocatedUnit:
++    unit_id: str
++    reason: str
++
++
++@dataclass(frozen=True)
++class AllocationCounters:
++    blocks: int
++    covers_computed: int
++    covers_reused: int
++    cover_masks_visited: int
++    marginal_contributions: int
++
++
++@dataclass(frozen=True)
++class AllocationResult:
++    allocation_version: str
++    theta_cents: int
++    formation_run_id: str
++    blocks: tuple[BlockAllocation, ...]
++    shares: tuple[TravelerShare, ...]
++    unallocated: tuple[UnallocatedUnit, ...]
++    counters: AllocationCounters
++    durations_seconds: tuple[tuple[str, float], ...]  # volatile, outside the digest
++    allocation_sha256: str
++
++    def block_for(self, unit_id: str) -> BlockAllocation:
++        for block in self.blocks:
++            if unit_id in block.unit_ids:
++                return block
++        raise KeyError(unit_id)
++
++    def payment(self, unit_id: str) -> int:
++        return self.block_for(unit_id).payment(unit_id)
++
++    def shares_for(self, unit_id: str) -> tuple[TravelerShare, ...]:
++        return tuple(share for share in self.shares if share.unit_id == unit_id)
++
++
++# --- computation --------------------------------------------------------------------------
++
++
++class SubstepClock:
++    def __init__(self):
++        self.totals = dict.fromkeys(SUBSTEPS, 0.0)
++
++    def add(self, name: str, started: float) -> None:
++        self.totals[name] += perf_counter() - started
++
++
++def allocate_block(
++    game: CoalitionGame,
++    unit_ids: Iterable[str],
++    offer_id: str,
++    cost_cents: int,
++    cover_cache: CoverCache,
++    clock: SubstepClock | None = None,
++) -> tuple[BlockAllocation, int]:
++    """Steps 1 to 4 and 6 for one block of a component game; returns the marginal count.
++
++    The caller checks the preconditions on the formation (``allocate_formation``).
++    """
++    clock = clock or SubstepClock()
++    block = canonical_coalition(unit_ids)
++    references = {unit: game.reference(unit) for unit in block}
++    value = sum(references.values()) - cost_cents
++    if len(block) == 1:
++        unit = block[0]
++        if value != 0:
++            raise AllocationConsistencyError(f"singleton {unit} must have value 0")
++        zero = Fraction(0)
++        return (
++            BlockAllocation(
++                unit_ids=block,
++                offer_id=offer_id,
++                cost_cents=cost_cents,
++                value_cents=0,
++                references_cents=((unit, references[unit]),),
++                phi=((unit, zero),),
++                y=((unit, zero),),
++                y_rounded=((unit, 0),),
++                payments_cents=((unit, references[unit]),),
++                projection_active=False,
++                saturated_unit_ids=(),
++                lambda_star=zero,
++                distance_squared=zero,
++                distance_max=zero,
++                rounding_gap=zero,
++                max_core_excess=None,
++            ),
++            0,
++        )
++    if not game.is_feasible(block) or game.value(block) != value:
++        raise AllocationConsistencyError(f"block {block} disagrees with its component game")
++    if value < 0:
++        raise AllocationConsistencyError(f"block {block} has a negative value")
++
++    started = perf_counter()
++    cover = cover_cache.block_cover(game, block)
++    masks = values_by_mask(block, cover)
++    clock.add("cover", started)
++    if masks[-1] != value:
++        raise AllocationConsistencyError("v*(C) must equal v(C) for a formed block")
++
++    started = perf_counter()
++    shapley = shapley_exact(block, masks)
++    clock.add("shapley", started)
++    phi = dict(shapley.phi)
++    if any(amount < 0 for amount in phi.values()):
++        raise AllocationConsistencyError(f"negative Shapley value in block {block}")
++    if sum(phi.values()) != value:
++        raise AllocationConsistencyError(f"Shapley values of {block} do not sum to v(C)")
++
++    started = perf_counter()
++    lower = dict.fromkeys(block, 0)
++    upper = {unit: references[unit] - THETA_CENTS for unit in block}
++    projection = project_onto_bounds(phi, value, lower, upper)
++    clock.add("projection", started)
++    y = dict(projection.y)
++
++    started = perf_counter()
++    rounded = round_largest_remainder(y, value, upper)
++    clock.add("rounding", started)
++    payments = {unit: references[unit] - rounded[unit] for unit in block}
++
++    started = perf_counter()
++    excess = max_core_excess(block, masks, y)
++    clock.add("core_excess", started)
++    allocation = BlockAllocation(
++        unit_ids=block,
++        offer_id=offer_id,
++        cost_cents=cost_cents,
++        value_cents=value,
++        references_cents=tuple((unit, references[unit]) for unit in block),
++        phi=shapley.phi,
++        y=projection.y,
++        y_rounded=tuple((unit, rounded[unit]) for unit in block),
++        payments_cents=tuple((unit, payments[unit]) for unit in block),
++        projection_active=projection.active,
++        saturated_unit_ids=projection.saturated_high,
++        lambda_star=projection.lambda_star,
++        distance_squared=squared_distance(y, phi),
++        distance_max=max_distance(y, phi),
++        rounding_gap=max(abs(rounded[unit] - y[unit]) for unit in block),
++        max_core_excess=excess,
++    )
++    return allocation, shapley.marginal_contributions
++
++
++def split_unit_payment(
++    unit: TravelUnit, amount_cents: int, clock: SubstepClock | None = None
++) -> tuple[TravelerShare, ...]:
++    """Equal awards under per-seat budgets, then largest remainder per seat (plan §6.1)."""
++    clock = clock or SubstepClock()
++    started = perf_counter()
++    caps = {}
++    for profile in unit.profiles:
++        budget = unit.budget_per_seat_cents(profile.profile_id)
++        for rank in range(1, profile.traveller_count + 1):
++            caps[(profile.profile_id, rank)] = budget
++    awards = constrained_equal_awards(amount_cents, caps)
++    rounded = round_largest_remainder(dict(awards.amounts), amount_cents, caps)
++    saturated = set(awards.saturated)
++    shares = tuple(
++        TravelerShare(
++            unit_id=unit.unit_id,
++            profile_id=profile_id,
++            seat_rank=rank,
++            budget_cents=caps[(profile_id, rank)],
++            amount_cents=rounded[(profile_id, rank)],
++            profile_saturated=(profile_id, rank) in saturated,
++            unit_tau=awards.tau,
++        )
++        for profile_id, rank in sorted(caps)
++    )
++    clock.add("traveler_split", started)
++    return shares
++
++
++def _component_of(formation: FormationResult, block: FormedBlock):
++    members = set(block.unit_ids)
++    for component in formation.components:
++        if members <= set(component.unit_ids):
++            return component
++    raise AllocationPreconditionError(f"block {block.unit_ids} belongs to no component")
++
++
++def _check_preconditions(formation: FormationResult, block: FormedBlock, evaluated: set) -> None:
++    """Scope review I2, §3.2: the game exists, C is in F, every subset of C was evaluated."""
++    component = _component_of(formation, block)
++    game = component.game
++    if game is None:
++        raise AllocationPreconditionError(f"no game for the component of {block.unit_ids}")
++    if not game.is_feasible(block.unit_ids):
++        raise AllocationPreconditionError(f"block {block.unit_ids} is not a feasible coalition")
++    for size in range(1, len(block.unit_ids) + 1):
++        for subset in combinations(block.unit_ids, size):
++            if subset not in evaluated:
++                raise AllocationPreconditionError(
++                    f"sub-coalition {subset} of {block.unit_ids} was not evaluated by P4"
++                )
++    references = sum(game.reference(unit) for unit in block.unit_ids)
++    if references != block.reference_total_cents or block.cost_cents <= 0:
++        raise AllocationPreconditionError(f"amounts of block {block.unit_ids} are inconsistent")
++
++
++def _fraction(value: Fraction | None) -> str | None:
++    return None if value is None else f"{value.numerator}/{value.denominator}"
++
++
++def _digest(payload) -> str:
++    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
++    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
++
++
++def canonical_allocation_content(
++    formation_run_id: str,
++    blocks: Iterable[BlockAllocation],
++    shares: Iterable[TravelerShare],
++    unallocated: Iterable[UnallocatedUnit],
++) -> dict:
++    """Everything that determines the allocation, with theta and the version (ID-6)."""
++    return {
++        "allocation_version": ALLOCATION_VERSION,
++        "theta_cents": THETA_CENTS,
++        "formation_run_id": formation_run_id,
++        "blocks": [
++            {
++                "unit_ids": list(block.unit_ids),
++                "offer_id": block.offer_id,
++                "cost_cents": block.cost_cents,
++                "value_cents": block.value_cents,
++                "phi": [[unit, _fraction(value)] for unit, value in block.phi],
++                "y": [[unit, _fraction(value)] for unit, value in block.y],
++                "payments_cents": [list(item) for item in block.payments_cents],
++                "lambda_star": _fraction(block.lambda_star),
++                "saturated": list(block.saturated_unit_ids),
++                "max_core_excess": _fraction(block.max_core_excess),
++            }
++            for block in blocks
++        ],
++        "shares": [
++            [share.unit_id, share.profile_id, share.seat_rank, share.amount_cents]
++            for share in shares
++        ],
++        "unallocated": [[item.unit_id, item.reason] for item in unallocated],
++    }
++
++
++def _check_block_invariants(block: BlockAllocation, units: dict[str, TravelUnit]) -> None:
++    """Scope review I2, §3.5, block level: checked before any traveller split."""
++    payments = dict(block.payments_cents)
++    references = dict(block.references_cents)
++    if sum(payments.values()) != block.cost_cents:
++        raise AllocationConsistencyError(f"block {block.unit_ids}: sum x' != c(C)")
++    for unit_id, payment in payments.items():
++        if not 0 <= payment <= references[unit_id] <= units[unit_id].budget_total_cents:
++            raise AllocationConsistencyError(f"{unit_id}: 0 <= x' <= ref <= B violated")
++
++
++def _check_share_invariants(
++    blocks: tuple[BlockAllocation, ...], shares: tuple[TravelerShare, ...]
++) -> None:
++    """Scope review I2, §3.5, traveller level."""
++    paid = {unit: amount for block in blocks for unit, amount in block.payments_cents}
++    by_unit: dict[str, int] = {}
++    for share in shares:
++        if not 0 <= share.amount_cents <= share.budget_cents:
++            raise AllocationConsistencyError(
++                f"{share.unit_id}/{share.profile_id}#{share.seat_rank}: 0 <= q' <= b violated"
++            )
++        by_unit[share.unit_id] = by_unit.get(share.unit_id, 0) + share.amount_cents
++    if by_unit != paid:
++        raise AllocationConsistencyError("traveller shares do not sum to their unit payment")
++
++
++def allocate_formation(
++    formation: FormationResult,
++    units: Iterable[TravelUnit],
++    *,
++    cover_cache: CoverCache | None = None,
++) -> AllocationResult:
++    """P5 for every block of a formation; never calls an oracle."""
++    if not isinstance(formation, FormationResult):
++        raise TypeError("formation must be a FormationResult")
++    unit_map = {unit.unit_id: unit for unit in units}
++    cache = cover_cache if cover_cache is not None else CoverCache()
++    clock = SubstepClock()
++    evaluated = {cost.unit_ids for cost in formation.evaluations}
++    blocks: list[BlockAllocation] = []
++    shares: list[TravelerShare] = []
++    marginal = 0
++    for block in formation.blocks:
++        missing = [unit for unit in block.unit_ids if unit not in unit_map]
++        if missing:
++            raise AllocationPreconditionError(f"units {missing} are not in the lot")
++        if len(block.unit_ids) > 1:
++            _check_preconditions(formation, block, evaluated)
++        game = _component_of(formation, block).game
++        if game is None:
++            raise AllocationPreconditionError(f"no game for the component of {block.unit_ids}")
++        allocation, contributions = allocate_block(
++            game, block.unit_ids, block.offer_id, block.cost_cents, cache, clock
++        )
++        marginal += contributions
++        _check_block_invariants(allocation, unit_map)
++        blocks.append(allocation)
++        for unit_id, payment in allocation.payments_cents:
++            shares.extend(split_unit_payment(unit_map[unit_id], payment, clock))
++    unresolved_reason = (
++        "capacity_model_violated"
++        if formation.status == "capacity_model_violated"
++        else "component_too_large"
++    )
++    unallocated = sorted(
++        [UnallocatedUnit(item.unit_id, item.reason) for item in formation.unserved]
++        + [
++            UnallocatedUnit(unit_id, unresolved_reason) for unit_id in formation.unresolved_unit_ids
++        ],
++        key=lambda item: item.unit_id,
++    )
++    block_tuple, share_tuple = tuple(blocks), tuple(shares)
++    _check_share_invariants(block_tuple, share_tuple)
++    content = canonical_allocation_content(
++        formation.formation_run_id, block_tuple, share_tuple, unallocated
++    )
++    return AllocationResult(
++        allocation_version=ALLOCATION_VERSION,
++        theta_cents=THETA_CENTS,
++        formation_run_id=formation.formation_run_id,
++        blocks=block_tuple,
++        shares=share_tuple,
++        unallocated=tuple(unallocated),
++        counters=AllocationCounters(
++            blocks=len(block_tuple),
++            covers_computed=cache.computed,
++            covers_reused=cache.reused,
++            cover_masks_visited=cache.masks_visited,
++            marginal_contributions=marginal,
++        ),
++        durations_seconds=tuple(clock.totals.items()),
++        allocation_sha256=_digest(content),
++    )
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/application/trip_planning.py b/Multi-Agent/coalition_travel/application/trip_planning.py
+--- a/Multi-Agent/coalition_travel/application/trip_planning.py	2026-11-19 23:00:05
++++ b/Multi-Agent/coalition_travel/application/trip_planning.py	2026-11-19 18:20:35
+@@ -24,6 +24,7 @@
+ This module imports no infrastructure: the market and its sessions are ports.
+ """
+ 
++import re
+ from collections.abc import Mapping
+ from dataclasses import dataclass
+ from datetime import date, datetime
+@@ -37,12 +38,17 @@
+     run_formation_stages,
+ )
+ from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.savings_allocation import (
++    AllocationResult,
++    allocate_formation,
++)
+ from coalition_travel.application.travel_units import TravelUnitError, build_travel_unit
+ from coalition_travel.domain.negotiation_request import NegotiationOutcome, NegotiationRequest
+ from coalition_travel.domain.offer import OfferCatalog
+ from coalition_travel.domain.travel_unit import MAX_UNIT_ID_LENGTH, TravelUnit
+ 
+ PLANNING_VERSION = "3h-planning-v1"
++_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
+ PlanStatus = Literal["planned", "request_rejected"]
+ 
+ 
+@@ -142,6 +148,9 @@
+         for name in ("version", "sha256", "catalog_version"):
+             if type(getattr(self, name)) is not str or not getattr(self, name):
+                 raise TypeError(f"{name} must be a non-empty string")
++        # I1 hardening (review reserve 1): a provenance digest, not any string.
++        if not _SHA256_PATTERN.fullmatch(self.sha256):
++            raise PlanningInputError("pool sha256 must be 64 lowercase hexadecimal characters")
+         if type(self.requests) is not tuple or any(
+             type(item) is not PlanningRequest for item in self.requests
+         ):
+@@ -217,12 +226,18 @@
+     pool_version: str | None
+     pool_sha256: str | None
+     planning_version: str = PLANNING_VERSION
++    allocation: AllocationResult | None = None  # P5 (I2); default keeps I1 constructions
+ 
+     def __post_init__(self):
+         if (self.status == "planned") != (self.stages is not None):
+             raise PlanConsistencyError("stages are present exactly for a planned lot")
+         if (self.status == "request_rejected") != bool(self.rejections):
+             raise PlanConsistencyError("rejections are present exactly for a rejected plan")
++        if self.allocation is not None and (
++            self.stages is None
++            or self.allocation.formation_run_id != self.stages.formation.formation_run_id
++        ):
++            raise PlanConsistencyError("an allocation belongs to the formation of its plan")
+ 
+     @property
+     def formation(self) -> FormationResult | None:
+@@ -365,6 +380,10 @@
+     )
+     journals = MappingProxyType(dict(session.journals))
+     invariants = verify_journal_invariants(stages, journals, session.oracle_calls)
++    calls_before_allocation = session.oracle_calls
++    allocation = allocate_formation(stages.formation, units)  # P5, no oracle call
++    if session.oracle_calls != calls_before_allocation:
++        raise PlanConsistencyError("P5 must not call the negotiation oracle")
+     return TripPlan(
+         status="planned",
+         focus_request_ids=focus_ids,
+@@ -374,5 +393,6 @@
+         stages=stages,
+         journals=journals,
+         invariants=invariants,
++        allocation=allocation,
+         **provenance,
+     )
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/domain/savings_allocation.py b/Multi-Agent/coalition_travel/domain/savings_allocation.py
+--- a/Multi-Agent/coalition_travel/domain/savings_allocation.py	1970-01-01 01:00:00
++++ b/Multi-Agent/coalition_travel/domain/savings_allocation.py	2026-11-19 18:25:14
+@@ -0,0 +1,301 @@
++"""Exact mathematics of P5: Shapley on v*, projection, largest remainder, equal awards.
++
++Pure functions on rationals (``fractions.Fraction``) and integer cents; no float is ever
++produced. References: ``docs/PHASE_P4_SPECIFICATION.md`` §9.2 to §9.6,
++``docs/PHASE_3H_P5_INTEGRATION_PLAN.md`` §6.1 (ID-5) and
++``docs/PHASE_P5_ADDENDUM_ID6.md`` (theta = 0).
++
++Objects and the properties that hold for each of them (scope review I2, §5.1):
++
++- ``shapley_exact`` returns phi, the Shapley value of the cover game v*|C: efficiency,
++  symmetry, null player, additivity, and phi >= 0 because v* is superadditive;
++- ``project_onto_bounds`` returns y, the Euclidean projection of phi onto
++  {sum y = V, l <= y <= h}: conserved sum, bounds, KKT form y = clip(phi - lambda*, l, h)
++  and the lambda* convention. The Shapley axioms are *not* required of y: a null player
++  can receive y > 0 when another unit is saturated;
++- ``round_largest_remainder`` returns y' in cents: exact sum, y' in {floor y, floor y + 1},
++  bounds kept, ties broken by key;
++- ``constrained_equal_awards`` splits a unit payment X over its seats: q_s = min(b_s, tau)
++  with sum q = X (equal awards under individual caps).
++"""
++
++from collections.abc import Hashable, Mapping, Sequence
++from dataclasses import dataclass
++from fractions import Fraction
++from math import factorial, floor
++
++
++class AllocationMathError(ValueError):
++    """An input is outside the domain of a P5 computation, or an exact check failed."""
++
++
++def _require_int(value, name: str) -> int:
++    if type(value) is not int:
++        raise AllocationMathError(f"{name} must be an int, not {type(value).__name__}")
++    return value
++
++
++def _require_exact(value, name: str) -> Fraction:
++    if type(value) is int:
++        return Fraction(value)
++    if type(value) is not Fraction:
++        raise AllocationMathError(
++            f"{name} must be an int or a Fraction, not {type(value).__name__}"
++        )
++    return value
++
++
++def _clip(value: Fraction, low, high) -> Fraction:
++    return min(max(value, Fraction(low)), Fraction(high))
++
++
++# --- the cover game, indexed by bit masks -----------------------------------------------
++
++
++def values_by_mask(members: Sequence[str], cover: Mapping[tuple[str, ...], int]) -> list[int]:
++    """values[mask] = v*(S) where bit i of mask selects members[i]; values[0] = 0.
++
++    ``cover`` must define every non-empty subset of ``members`` and nothing else.
++    """
++    members = tuple(members)
++    if len(set(members)) != len(members) or not members:
++        raise AllocationMathError("members must be unique and non-empty")
++    index = {member: position for position, member in enumerate(members)}
++    values: list[int | None] = [None] * (1 << len(members))
++    values[0] = 0
++    for coalition, value in cover.items():
++        mask = 0
++        for member in coalition:
++            if member not in index:
++                raise AllocationMathError(f"cover coalition {coalition} contains a non-member")
++            mask |= 1 << index[member]
++        if mask == 0 or values[mask] is not None:
++            raise AllocationMathError(f"cover coalition {coalition} is empty or repeated")
++        values[mask] = _require_int(value, f"v*{coalition}")
++    if any(value is None for value in values):
++        raise AllocationMathError("the cover must define v* on every non-empty subset")
++    return values  # type: ignore[return-value]
++
++
++# --- Shapley value ----------------------------------------------------------------------
++
++
++@dataclass(frozen=True)
++class ShapleyResult:
++    phi: tuple[tuple[str, Fraction], ...]
++    marginal_contributions: int
++
++
++def shapley_exact(members: Sequence[str], values: Sequence[int]) -> ShapleyResult:
++    """phi_u = N_u / n!, N_u = sum over S not containing u of |S|!(n-|S|-1)! (v(S+u) - v(S)).
++
++    The numerator is an exact integer; one Fraction is built per member.
++    """
++    members = tuple(members)
++    n = len(members)
++    if len(values) != 1 << n or values[0] != 0:
++        raise AllocationMathError("values must be indexed by every mask, with values[0] = 0")
++    weights = [factorial(size) * factorial(n - size - 1) for size in range(n)]
++    phi = []
++    for position, member in enumerate(members):
++        bit = 1 << position
++        numerator = 0
++        for mask in range(1 << n):
++            if mask & bit:
++                continue
++            numerator += weights[mask.bit_count()] * (values[mask | bit] - values[mask])
++        phi.append((member, Fraction(numerator, factorial(n))))
++    return ShapleyResult(tuple(phi), n * (1 << (n - 1)))
++
++
++# --- projection onto the bounds (specification §9.5) --------------------------------------
++
++
++@dataclass(frozen=True)
++class ProjectionResult:
++    y: tuple[tuple[str, Fraction], ...]
++    lambda_star: Fraction
++    saturated_high: tuple[str, ...]
++    saturated_low: tuple[str, ...]
++    active: bool
++
++
++def project_onto_bounds(
++    phi: Mapping[str, Fraction],
++    total,
++    lower: Mapping[str, int],
++    upper: Mapping[str, int],
++) -> ProjectionResult:
++    """Projection of phi onto {sum y = total, lower <= y <= upper}, computed exactly.
++
++    y_u = clip(phi_u - lambda*, lower_u, upper_u), where lambda* is the point of the root
++    interval of g(lambda) = sum clip(phi_u - lambda, l_u, h_u) - total that is closest to 0
++    (convention lambda* = min(max(0, lambda_lo), lambda_hi)).
++    """
++    keys = sorted(phi)
++    if set(keys) != set(lower) or set(keys) != set(upper) or not keys:
++        raise AllocationMathError("phi, lower and upper must describe the same units")
++    target = _require_exact(total, "total")
++    values = {key: _require_exact(phi[key], f"phi[{key}]") for key in keys}
++    for key in keys:
++        if _require_int(lower[key], "lower") > _require_int(upper[key], "upper"):
++            raise AllocationMathError(f"bounds of {key} are inverted")
++    if not sum(lower[key] for key in keys) <= target <= sum(upper[key] for key in keys):
++        raise AllocationMathError("the projection is infeasible: total outside the bounds")
++
++    def g(lam: Fraction) -> Fraction:
++        return sum(_clip(values[k] - lam, lower[k], upper[k]) for k in keys) - target
++
++    breakpoints = sorted(
++        {values[k] - upper[k] for k in keys} | {values[k] - lower[k] for k in keys}
++    )
++    zero = Fraction(0)
++    g_zero = g(zero)
++    lam: Fraction | None = None
++    if g_zero == 0:
++        lam = zero
++    elif g_zero < 0:  # roots lie left of 0: take the largest one
++        right, g_right = zero, g_zero
++        for left in reversed([point for point in breakpoints if point < 0]):
++            g_left = g(left)
++            if g_left >= 0:
++                lam = left + (right - left) * g_left / (g_left - g_right)
++                break
++            right, g_right = left, g_left
++    else:  # roots lie right of 0: take the smallest one
++        left, g_left = zero, g_zero
++        for right in [point for point in breakpoints if point > 0]:
++            g_right = g(right)
++            if g_right <= 0:
++                lam = left + (right - left) * g_left / (g_left - g_right)
++                break
++            left, g_left = right, g_right
++    if lam is None or g(lam) != 0:
++        raise AllocationMathError("no exact root found for a feasible projection")
++    y = {k: _clip(values[k] - lam, lower[k], upper[k]) for k in keys}
++    if sum(y.values()) != target:
++        raise AllocationMathError("the projected allocation does not sum to the total")
++    return ProjectionResult(
++        y=tuple((k, y[k]) for k in keys),
++        lambda_star=lam,
++        saturated_high=tuple(k for k in keys if values[k] - lam > upper[k]),
++        saturated_low=tuple(k for k in keys if values[k] - lam < lower[k]),
++        active=any(y[k] != values[k] for k in keys),
++    )
++
++
++# --- largest remainder (specification §9.6) -----------------------------------------------
++
++
++def round_largest_remainder(
++    values: Mapping[Hashable, Fraction], total: int, upper: Mapping[Hashable, int]
++) -> dict:
++    """Integer allocation summing to ``total``: floors, then +1 to the largest fractions.
++
++    Ties between equal fractional parts are broken by ascending key. A key whose value is
++    an integer never receives a unit; every result stays within [floor, upper].
++    """
++    _require_int(total, "total")
++    keys = sorted(values)
++    exact = {key: _require_exact(values[key], f"value[{key}]") for key in keys}
++    if sum(exact.values()) != total:
++        raise AllocationMathError("values must sum exactly to the total before rounding")
++    floors = {key: floor(exact[key]) for key in keys}
++    remainder = total - sum(floors.values())
++    fractional = [key for key in keys if exact[key] != floors[key]]
++    # The fractional parts are < 1 and sum to the remainder r, so r > 0 implies that
++    # strictly more than r values are fractional (specification §9.6).
++    if remainder < 0 or (remainder > 0 and remainder >= len(fractional)):
++        raise AllocationMathError("the remainder is outside [0, number of fractional values)")
++    ranked = sorted(fractional, key=lambda key: (-(exact[key] - floors[key]), key))
++    result = dict(floors)
++    for key in ranked[:remainder]:
++        result[key] += 1
++    for key in keys:
++        if result[key] > _require_int(upper[key], f"upper[{key}]"):
++            raise AllocationMathError(f"rounding pushed {key} above its upper bound")
++    return result
++
++
++# --- equal awards under individual caps (plan §6.1, ID-5) --------------------------------
++
++
++@dataclass(frozen=True)
++class EqualAwardsResult:
++    tau: Fraction
++    amounts: tuple[tuple[Hashable, Fraction], ...]
++    saturated: tuple[Hashable, ...]
++
++
++def constrained_equal_awards(total: int, caps: Mapping[Hashable, int]) -> EqualAwardsResult:
++    """q_s = min(b_s, tau) with sum q = total: the most equal split under the caps b_s.
++
++    tau is unique when total < sum caps; when total = sum caps the convention is
++    tau = max caps (the vector q = caps is the same for every admissible tau).
++    """
++    _require_int(total, "total")
++    keys = sorted(caps)
++    if not keys:
++        raise AllocationMathError("at least one seat is required")
++    for key in keys:
++        if _require_int(caps[key], f"cap[{key}]") < 0:
++            raise AllocationMathError("caps must be non-negative")
++    capacity = sum(caps[key] for key in keys)
++    if not 0 <= total <= capacity:
++        raise AllocationMathError("the amount must lie between 0 and the sum of the caps")
++    if total == capacity:
++        tau = Fraction(max(caps[key] for key in keys))
++    else:
++        remaining, count = total, len(keys)
++        tau = None
++        for key in sorted(keys, key=lambda item: (caps[item], item)):
++            candidate = Fraction(remaining, count)
++            if candidate <= caps[key]:
++                tau = candidate
++                break
++            remaining -= caps[key]
++            count -= 1
++        if tau is None:
++            raise AllocationMathError("no level tau found although total < sum of caps")
++    amounts = {key: min(Fraction(caps[key]), tau) for key in keys}
++    if sum(amounts.values()) != total:
++        raise AllocationMathError("equal awards do not sum to the total")
++    return EqualAwardsResult(
++        tau=tau,
++        amounts=tuple((key, amounts[key]) for key in keys),
++        saturated=tuple(key for key in keys if caps[key] < tau),
++    )
++
++
++# --- diagnostics ------------------------------------------------------------------------
++
++
++def max_core_excess(
++    members: Sequence[str], values: Sequence[int], y: Mapping[str, Fraction]
++) -> Fraction | None:
++    """max over proper non-empty S of v*(S) - sum_{u in S} y_u; None for a singleton.
++
++    Measured only: a positive value means some sub-group would gain by seceding.
++    """
++    members = tuple(members)
++    n = len(members)
++    if n < 2:
++        return None
++    sums = [Fraction(0)] * (1 << n)
++    best: Fraction | None = None
++    full = (1 << n) - 1
++    for mask in range(1, full + 1):
++        lowest = (mask & -mask).bit_length() - 1
++        sums[mask] = sums[mask & (mask - 1)] + y[members[lowest]]
++        if mask != full:
++            excess = values[mask] - sums[mask]
++            best = excess if best is None or excess > best else best
++    return best
++
++
++def squared_distance(a: Mapping[str, Fraction], b: Mapping[str, Fraction]) -> Fraction:
++    return sum(((a[key] - b[key]) ** 2 for key in a), Fraction(0))
++
++
++def max_distance(a: Mapping[str, Fraction], b: Mapping[str, Fraction]) -> Fraction:
++    return max((abs(a[key] - b[key]) for key in a), default=Fraction(0))
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/infrastructure/demand/demand_pool.py b/Multi-Agent/coalition_travel/infrastructure/demand/demand_pool.py
+--- a/Multi-Agent/coalition_travel/infrastructure/demand/demand_pool.py	2026-11-19 23:00:05
++++ b/Multi-Agent/coalition_travel/infrastructure/demand/demand_pool.py	2026-11-19 18:25:14
+@@ -79,10 +79,12 @@
+     manifest_path = pool_path.with_suffix(".manifest.json")
+     if not manifest_path.is_file():
+         raise DemandPoolError(f"missing demand pool manifest: {manifest_path}")
++    try:  # I1 hardening (review reserve 2): one error type for every invalid manifest
++        manifest_text = _read_bytes(manifest_path).decode("utf-8")
++    except UnicodeDecodeError as exc:
++        raise DemandPoolError(f"{manifest_path}: invalid UTF-8") from exc
+     manifest = _object(
+-        _strict_json(_read_bytes(manifest_path).decode("utf-8"), str(manifest_path)),
+-        MANIFEST_KEYS,
+-        str(manifest_path),
++        _strict_json(manifest_text, str(manifest_path)), MANIFEST_KEYS, str(manifest_path)
+     )
+     origin = str(manifest_path)
+     if manifest["pool_file"] != pool_path.name:
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/evaluate_allocation.py b/Multi-Agent/evaluate_allocation.py
+--- a/Multi-Agent/evaluate_allocation.py	1970-01-01 01:00:00
++++ b/Multi-Agent/evaluate_allocation.py	2026-11-19 18:29:46
+@@ -0,0 +1,279 @@
++"""P5 performance measurements M0, M1 and M2 in one session (scope review I2, §6).
++
++M0  T_P4_total(14): full P4 pipeline (``run_formation_stages`` with a fresh cache) on the
++    10 instances of 14 units of the P4 performance stratum (same cell, same seeds).
++M1  T_P5 on dense blocks (every sub-coalition feasible, grand coalition optimal),
++    k = 2 to 14, games built directly; durations split by sub-step.
++M2  The exploratory stratum regenerated with the same cells and seeds; for each instance
++    T_P4_total and T_P5 are measured in the same run; statistics over the instances that
++    have at least one block.
++
++Protocol: one warm-up, then ``--repetitions`` timed runs (default 5); medians per item.
++Thresholds registered before measuring (scope review I2, §6):
++    M1: median T_P5(dense k = 14) < median T_P4_total(14) of M0 in this session;
++    M2: median over instances of T_P5 / T_P4_total <= 0.25.
++Durations are volatile and machine dependent; the output directory also holds the
++generated scenario catalogues, which contain private seller terms: never version it.
++"""
++
++import argparse
++import hashlib
++import json
++import platform
++import statistics
++import sys
++from decimal import Decimal
++from itertools import combinations
++from pathlib import Path
++from time import perf_counter
++
++from coalition_travel.application.coalition_formation import run_formation_stages
++from coalition_travel.application.savings_allocation import (
++    SUBSTEPS,
++    CoverCache,
++    SubstepClock,
++    allocate_block,
++    allocate_formation,
++    split_unit_payment,
++)
++from coalition_travel.domain.coalition_game import build_game
++from coalition_travel.domain.travel_unit import TravelUnit
++from coalition_travel.domain.traveler_profile import TravelerProfile
++from coalition_travel.infrastructure.evaluation.formation_scenarios import (
++    ScenarioParameters,
++    build_scenario,
++)
++from evaluate_formation import FAMILY_CELLS, ofat_cells, random_cells
++
++M1_THRESHOLD = "median T_P5(dense k=14) < median T_P4_total(14)"
++M2_THRESHOLD_RATIO = 0.25
++DENSE_REFERENCE_CENTS = 100_000
++
++
++def _median(values):
++    return statistics.median(values) if values else None
++
++
++def _quantile(values, fraction):
++    if not values:
++        return None
++    ordered = sorted(values)
++    return ordered[min(len(ordered) - 1, round(fraction * (len(ordered) - 1)))]
++
++
++def _p4_run(scenario):
++    started = perf_counter()
++    stages = run_formation_stages(
++        scenario.units, scenario.catalog, scenario.reference_date, scenario.oracle
++    )
++    return stages, perf_counter() - started
++
++
++def _p5_run(formation, units):
++    started = perf_counter()
++    allocation = allocate_formation(formation, units)
++    return allocation, perf_counter() - started
++
++
++def measure_m0(output: Path, repetitions: int, instances: int = 10) -> dict:
++    cell = ScenarioParameters(
++        unit_count=14,
++        profiles_per_unit=1,
++        offer_count=1,
++        density_percent=100,
++        agreement_target_percent=100,
++    )
++    samples, per_instance = [], []
++    for seed_index in range(instances):
++        scenario = build_scenario(cell, seed_index, output / "scenarios")
++        reference, _ = _p4_run(scenario)  # warm-up
++        times = []
++        for _ in range(repetitions):
++            stages, elapsed = _p4_run(scenario)
++            if stages.formation.result_sha256 != reference.formation.result_sha256:
++                raise RuntimeError("a P4 repetition produced a different result")
++            times.append(elapsed)
++        samples.extend(times)
++        per_instance.append({"seed_index": seed_index, "median_seconds": _median(times)})
++    return {"samples": len(samples), "median_seconds": _median(samples), "instances": per_instance}
++
++
++def dense_game(k: int):
++    """All sub-coalitions feasible; v(S) = 1000 (|S|-1)^2 + (|S|-1) sum w_u, superadditive."""
++    players = tuple(f"u{index:02d}" for index in range(k))
++    weights = {unit: 10 * (index + 1) for index, unit in enumerate(players)}
++    references = dict.fromkeys(players, DENSE_REFERENCE_CENTS)
++    costs = {}
++    for size in range(1, k + 1):
++        for coalition in combinations(players, size):
++            value = 1_000 * (size - 1) ** 2 + (size - 1) * sum(weights[u] for u in coalition)
++            costs[coalition] = size * DENSE_REFERENCE_CENTS - value
++    return build_game(f"dense-{k}", references, costs, "dense-measurement"), players
++
++
++def _dense_units(players):
++    budget = Decimal(DENSE_REFERENCE_CENTS) / 100
++    return {
++        unit: TravelUnit(
++            unit,
++            "dense",
++            (TravelerProfile("all", 1, "Dense", budget),),
++            hashlib.sha256(unit.encode()).hexdigest(),
++        )
++        for unit in players
++    }
++
++
++def _dense_allocation(game, players, units):
++    clock = SubstepClock()
++    started = perf_counter()
++    block, _ = allocate_block(
++        game,
++        players,
++        "dense",
++        game.reference(players[0]) * len(players) - game.value(players),
++        CoverCache(),
++        clock,
++    )
++    for unit, payment in block.payments_cents:
++        split_unit_payment(units[unit], payment, clock)
++    return block, perf_counter() - started, clock.totals
++
++
++def measure_m1(repetitions: int, sizes=range(2, 15)) -> list[dict]:
++    rows = []
++    for k in sizes:
++        game, players = dense_game(k)
++        units = _dense_units(players)
++        reference, _, _ = _dense_allocation(game, players, units)  # warm-up
++        totals, steps = [], {name: [] for name in SUBSTEPS}
++        for _ in range(repetitions):
++            block, elapsed, substeps = _dense_allocation(game, players, units)
++            if block != reference:
++                raise RuntimeError("a P5 repetition produced a different allocation")
++            totals.append(elapsed)
++            for name in SUBSTEPS:
++                steps[name].append(substeps[name])
++        rows.append(
++            {
++                "k": k,
++                "median_seconds": _median(totals),
++                "q1_seconds": _quantile(totals, 0.25),
++                "q3_seconds": _quantile(totals, 0.75),
++                "substep_median_seconds": {name: _median(v) for name, v in steps.items()},
++            }
++        )
++    return rows
++
++
++def measure_m2(output: Path, repetitions: int, seeds: int, random_count: int) -> dict:
++    cells = ofat_cells() + random_cells(random_count) + FAMILY_CELLS
++    records = []
++    for cell in cells:
++        for seed_index in range(seeds):
++            scenario = build_scenario(cell, seed_index, output / "scenarios")
++            stages, _ = _p4_run(scenario)  # warm-up
++            reference, _ = _p5_run(stages.formation, scenario.units)
++            p4_times, p5_times = [], []
++            for _ in range(repetitions):
++                stages, p4_elapsed = _p4_run(scenario)
++                allocation, p5_elapsed = _p5_run(stages.formation, scenario.units)
++                if allocation.allocation_sha256 != reference.allocation_sha256:
++                    raise RuntimeError("a P5 repetition produced a different allocation")
++                p4_times.append(p4_elapsed)
++                p5_times.append(p5_elapsed)
++            block_sizes = [len(block.unit_ids) for block in stages.formation.blocks]
++            records.append(
++                {
++                    "cell": cell.cell_id,
++                    "seed_index": seed_index,
++                    "formation_status": stages.formation.status,
++                    "blocks": len(block_sizes),
++                    "largest_block": max(block_sizes, default=0),
++                    "projection_active_blocks": sum(b.projection_active for b in reference.blocks),
++                    "t_p4_total_seconds": _median(p4_times),
++                    "t_p5_seconds": _median(p5_times),
++                    "allocation_sha256": reference.allocation_sha256,
++                }
++            )
++    with_blocks = [r for r in records if r["blocks"] > 0]
++    ratios = [r["t_p5_seconds"] / r["t_p4_total_seconds"] for r in with_blocks]
++    p5 = [r["t_p5_seconds"] for r in with_blocks]
++    sizes = [r["largest_block"] for r in with_blocks]
++    return {
++        "instances": len(records),
++        "instances_with_blocks": len(with_blocks),
++        "t_p5_seconds": {
++            "median": _median(p5),
++            "p95": _quantile(p5, 0.95),
++            "max": max(p5, default=None),
++        },
++        "ratio_t_p5_over_t_p4_total": {
++            "median": _median(ratios),
++            "p95": _quantile(ratios, 0.95),
++            "max": max(ratios, default=None),
++        },
++        "largest_block_size": {
++            "median": _median(sizes),
++            "p95": _quantile(sizes, 0.95),
++            "max": max(sizes, default=None),
++        },
++        "projection_active_blocks": sum(r["projection_active_blocks"] for r in with_blocks),
++        "records": records,
++    }
++
++
++def main(argv=None) -> int:
++    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
++    parser.add_argument("--output", type=Path, required=True)
++    parser.add_argument("--repetitions", type=int, default=5)
++    parser.add_argument("--seeds", type=int, default=20)
++    parser.add_argument("--random-cells", type=int, default=60)
++    args = parser.parse_args(argv)
++    args.output.mkdir(parents=True, exist_ok=True)
++    started = perf_counter()
++    m0 = measure_m0(args.output, args.repetitions)
++    print(f"M0 median T_P4_total(14) = {m0['median_seconds']:.4f} s", flush=True)
++    m1 = measure_m1(args.repetitions)
++    k14 = next(row for row in m1 if row["k"] == 14)
++    print(f"M1 median T_P5(dense k=14) = {k14['median_seconds']:.4f} s", flush=True)
++    m2 = measure_m2(args.output, args.repetitions, args.seeds, args.random_cells)
++    ratio = m2["ratio_t_p5_over_t_p4_total"]["median"]
++    verdict = {
++        "M1": {
++            "rule": M1_THRESHOLD,
++            "t_p5_dense_k14_median_seconds": k14["median_seconds"],
++            "t_p4_total_14_median_seconds": m0["median_seconds"],
++            "met": k14["median_seconds"] < m0["median_seconds"],
++        },
++        "M2": {
++            "rule": f"median T_P5 / T_P4_total <= {M2_THRESHOLD_RATIO}",
++            "median_ratio": ratio,
++            "met": ratio is not None and ratio <= M2_THRESHOLD_RATIO,
++        },
++    }
++    document = {
++        "schema": "p5-allocation-measurements-v1",
++        "protocol": {"warm_up": 1, "repetitions": args.repetitions, "seeds": args.seeds},
++        "environment": {
++            "python": sys.version.split()[0],
++            "platform": platform.platform(),
++            "machine": platform.machine(),
++        },
++        "elapsed_seconds": perf_counter() - started,
++        "M0": m0,
++        "M1": m1,
++        "M2": m2,
++        "verdict": verdict,
++    }
++    (args.output / "allocation_measurements.json").write_text(
++        json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
++    )
++    print(f"M2 {m2['instances_with_blocks']}/{m2['instances']} instances with blocks", flush=True)
++    print(f"M2 median T_P5/T_P4_total = {ratio:.6f}", flush=True)
++    print(json.dumps(verdict, indent=2), flush=True)
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/tests/test_i1_hardening.py b/tests/test_i1_hardening.py
+--- a/tests/test_i1_hardening.py	1970-01-01 01:00:00
++++ b/tests/test_i1_hardening.py	2026-11-19 18:25:14
+@@ -0,0 +1,37 @@
++"""I2, decision D-I2-3: the two hardening reserves of the I1 review (I1 report, §9)."""
++
++import hashlib
++import json
++
++import pytest
++from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.trip_planning import (
++    DemandPoolSnapshot,
++    PlanningInputError,
++    PlanningRequest,
++)
++from coalition_travel.infrastructure.demand.demand_pool import DemandPoolError, load_demand_pool
++
++DRAFT = TravelRequestDraft(destination="Tokyo", travellers=1, budget_per_person="500")
++
++
++@pytest.mark.parametrize("digest", ["x", "0" * 63, "0" * 65, "A" * 64, "g" * 64, " " + "0" * 63])
++def test_a_snapshot_needs_a_lowercase_sha256_digest(digest):
++    """Reserve 1: a directly built DemandPoolSnapshot carries a real provenance digest."""
++    with pytest.raises(PlanningInputError, match="64 lowercase hexadecimal"):
++        DemandPoolSnapshot("pool", digest, "catalog-v1", (PlanningRequest("pool-a", DRAFT),))
++    valid = DemandPoolSnapshot("pool", "a" * 64, "catalog-v1", ())
++    assert valid.sha256 == "a" * 64
++
++
++def test_an_invalid_manifest_encoding_is_a_demand_pool_error(tmp_path):
++    """Reserve 2: the manifest's UTF-8 decoding is wrapped like the pool file's."""
++    line = json.dumps(
++        {"request_id": "pool-a", "synthetic": True, "draft": DRAFT.model_dump(mode="json")}
++    )
++    pool = tmp_path / "pool_v1.jsonl"
++    pool.write_bytes((line + "\n").encode("utf-8"))
++    pool.with_suffix(".manifest.json").write_bytes(b"\xff\xfe{}")
++    with pytest.raises(DemandPoolError, match="invalid UTF-8"):
++        load_demand_pool(pool)
++    assert hashlib.sha256(pool.read_bytes()).hexdigest()  # the pool file itself is fine
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/tests/test_i2_python310_compatibility.py b/tests/test_i2_python310_compatibility.py
+--- a/tests/test_i2_python310_compatibility.py	1970-01-01 01:00:00
++++ b/tests/test_i2_python310_compatibility.py	2026-11-19 18:24:57
+@@ -0,0 +1,36 @@
++"""I2: the new standard-library-only P5 module imports under a real Python 3.10 (A10).
++
++Kept apart from the existing compatibility tests so that I2 changes no existing test.
++The application module needs the project dependencies and is covered by the grammar
++check of tests/test_python310_compatibility.py.
++"""
++
++import shutil
++import subprocess
++from pathlib import Path
++
++import pytest
++
++REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
++PYTHON310 = shutil.which("python3.10")
++
++
++@pytest.mark.skipif(PYTHON310 is None, reason="python3.10 is not installed")
++def test_p5_domain_module_imports_and_computes_under_python_3_10():
++    code = (
++        "import sys; "
++        f"sys.path.insert(0, {str(REPOSITORY_ROOT / 'Multi-Agent')!r}); "
++        "from coalition_travel.domain.savings_allocation import shapley_exact; "
++        "from fractions import Fraction; "
++        "phi = dict(shapley_exact(('a', 'b', 'c'), [0, 0, 0, 6, 0, 0, 0, 9]).phi); "
++        "assert phi == {'a': 4, 'b': 4, 'c': 1}, phi"
++    )
++    completed = subprocess.run(
++        [PYTHON310, "-I", "-B", "-c", code],
++        cwd=REPOSITORY_ROOT,
++        capture_output=True,
++        text=True,
++        timeout=60,
++        check=False,
++    )
++    assert completed.returncode == 0, completed.stderr
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/tests/test_savings_allocation.py b/tests/test_savings_allocation.py
+--- a/tests/test_savings_allocation.py	1970-01-01 01:00:00
++++ b/tests/test_savings_allocation.py	2026-11-19 18:45:38
+@@ -0,0 +1,404 @@
++"""I2 (P5): allocation of a formation, through plan_lot and block by block."""
++
++import hashlib
++from dataclasses import replace
++from decimal import Decimal
++from fractions import Fraction
++from pathlib import Path
++
++import pytest
++from coalition_travel.application import savings_allocation, trip_planning
++from coalition_travel.application.coalition_candidates import FormationLimits
++from coalition_travel.application.coalition_formation import run_formation_stages
++from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.savings_allocation import (
++    ALLOCATION_VERSION,
++    THETA_CENTS,
++    AllocationConsistencyError,
++    AllocationPreconditionError,
++    CoverCache,
++    allocate_block,
++    allocate_formation,
++    canonical_allocation_content,
++    split_unit_payment,
++)
++from coalition_travel.application.trip_planning import (
++    DemandPoolSnapshot,
++    PlanConsistencyError,
++    PlanningInput,
++    PlanningRequest,
++    plan_lot,
++)
++from coalition_travel.domain.negotiation_request import negotiation_request_for
++from coalition_travel.domain.travel_unit import TravelUnit
++from coalition_travel.domain.traveler_profile import TravelerProfile
++from coalition_travel.infrastructure.demand.demand_pool import load_demand_pool
++from coalition_travel.infrastructure.negotiation.market import open_simulated_market
++from CoalitionStructureSearch import shapley_value
++from p4_support import REFERENCE
++from test_savings_allocation_math import game_of
++
++ROOT = Path(__file__).resolve().parents[1]
++CATALOG_PATH = ROOT / "data/catalog/catalog_v1.json"
++POOL_PATH = ROOT / "data/demand/demand_pool_v1.jsonl"
++PINNED = {
++    "a": ("Tokyo", 1, "520"),
++    "b": ("Tokyo", 1, "540"),
++    "c": ("Tokyo", 2, "500"),
++    "d": ("Tokyo", 1, "600"),
++    "e": ("Rome", 2, "450"),
++    "f": ("Rome", 1, "330"),
++}
++
++
++def request(request_id, destination="Tokyo", travellers=1, budget="520"):
++    draft = TravelRequestDraft(
++        destination=destination, travellers=travellers, budget_per_person=budget
++    )
++    return PlanningRequest(request_id, draft)
++
++
++@pytest.fixture(scope="module")
++def market():
++    return open_simulated_market(CATALOG_PATH, REFERENCE)
++
++
++@pytest.fixture(scope="module")
++def tokyo_plan(market):
++    pool = load_demand_pool(POOL_PATH)
++    return plan_lot(PlanningInput((request("user", "Tokyo", 8, "500"),), pool, REFERENCE), market)
++
++
++@pytest.fixture(scope="module")
++def pinned_plan(market):
++    pool = DemandPoolSnapshot(
++        "test-pool", "0" * 64, "catalog-v1", tuple(request(k, *PINNED[k]) for k in "bcdf")
++    )
++    focus = (request("a", *PINNED["a"]), request("e", *PINNED["e"]))
++    return plan_lot(PlanningInput(focus, pool, REFERENCE), market)
++
++
++def unit(unit_id, *profiles):
++    """profiles: (profile_id, seats, budget per seat in euros)."""
++    built = tuple(
++        TravelerProfile(profile_id, seats, "Tokyo", Decimal(budget))
++        for profile_id, seats, budget in sorted(profiles)
++    )
++    return TravelUnit(unit_id, "tokyo", built, hashlib.sha256(unit_id.encode()).hexdigest())
++
++
++# --- reference examples through the application -------------------------------------------
++
++
++def test_e3_tokyo_block_is_reproduced_exactly(tokyo_plan):
++    allocation = tokyo_plan.allocation
++    block = allocation.block_for("user")
++    assert block.unit_ids == ("pool-tyo-01", "pool-tyo-02", "pool-tyo-04", "user")
++    assert dict(block.phi) == {
++        "pool-tyo-01": 600,
++        "pool-tyo-02": 1_500,
++        "pool-tyo-04": 3_000,
++        "user": 3_900,
++    }
++    assert not block.projection_active and block.lambda_star == 0
++    assert dict(block.payments_cents) == {
++        "pool-tyo-01": 48_000,
++        "pool-tyo-02": 48_900,
++        "pool-tyo-04": 51_000,
++        "user": 380_100,
++    }
++    assert block.max_core_excess == 0  # {02, 04, user} is exactly at the core boundary
++    shares = allocation.shares_for("user")
++    assert [share.amount_cents for share in shares] == [47_513] * 4 + [47_512] * 4
++    assert {share.unit_tau for share in shares} == {Fraction(95_025, 2)}  # 475,125 EUR
++    singleton = allocation.block_for("pool-tyo-03")
++    assert dict(singleton.payments_cents) == {"pool-tyo-03": 90_720} and singleton.phi[0][1] == 0
++
++
++def test_e3_differential_oracle_on_the_cover_game(tokyo_plan):
++    """A4 on E3: the historical float shapley_value on v*|C agrees with the exact phi."""
++    block = tokyo_plan.allocation.block_for("user")
++    (game,) = (
++        component.game
++        for component in tokyo_plan.formation.components
++        if set(block.unit_ids) <= set(component.game.players)
++    )
++    cover = game.cover_values(block.unit_ids)
++
++    def v_star(coalition):
++        return cover[tuple(sorted(coalition))] if coalition else 0
++
++    tolerance = 1e-6 * max(1, abs(cover[block.unit_ids]))
++    for unit, phi in block.phi:
++        assert abs(shapley_value(unit, block.unit_ids, v_star) - phi) <= tolerance
++
++
++def test_pinned_lot_allocation_is_pinned(pinned_plan):
++    """Computed once at the start of I2, explained in the I2 report, then pinned."""
++    allocation = pinned_plan.allocation
++    assert [(b.unit_ids, dict(b.phi), b.payments_cents) for b in allocation.blocks] == [
++        (
++            ("a", "b", "c"),
++            {"a": 900, "b": 1_260, "c": 360},
++            (("a", 47_700), ("b", 49_140), ("c", 90_360)),
++        ),
++        (("d",), {"d": 0}, (("d", 54_000),)),
++        (("e", "f"), {"e": 4_500, "f": 4_500}, (("e", 55_500), ("f", 25_500))),
++    ]
++    assert [(s.unit_id, s.seat_rank, s.amount_cents) for s in allocation.shares] == [
++        ("a", 1, 47_700),
++        ("b", 1, 49_140),
++        ("c", 1, 45_180),
++        ("c", 2, 45_180),
++        ("d", 1, 54_000),
++        ("e", 1, 27_750),
++        ("e", 2, 27_750),
++        ("f", 1, 25_500),
++    ]
++    assert allocation.unallocated == ()
++    for block in allocation.blocks:
++        assert sum(dict(block.payments_cents).values()) == block.cost_cents
++
++
++def test_e2_and_e6_through_allocate_block():
++    references = {"a": 100, "b": 1_000, "c": 1_000}
++    e2 = game_of(references, {("a", "b", "c"): 900})
++    block, _ = allocate_block(e2, ("a", "b", "c"), "offer", 1_200, CoverCache())
++    assert dict(block.payments_cents) == {"a": 0, "b": 600, "c": 600}
++    assert block.saturated_unit_ids == ("a",) and block.lambda_star == -100
++    assert block.projection_active and block.distance_max == 200
++    e6 = game_of(references, {("a", "b"): 900, ("a", "b", "c"): 900})
++    block, _ = allocate_block(e6, ("a", "b", "c"), "offer", 1_200, CoverCache())
++    assert dict(block.y) == {"a": 100, "b": 625, "c": 175}
++    assert dict(block.payments_cents) == {"a": 0, "b": 375, "c": 825}
++
++
++def test_e4_and_e5_through_split_unit_payment():
++    shares = split_unit_payment(unit("u", ("a", 1, "10.00"), ("b", 1, "100.00")), 5_000)
++    assert [(s.profile_id, s.amount_cents, s.profile_saturated) for s in shares] == [
++        ("a", 1_000, True),
++        ("b", 4_000, False),
++    ]
++    before = split_unit_payment(unit("u", ("a", 1, "100.00"), ("b", 1, "200.00")), 3_001)
++    after = split_unit_payment(unit("u", ("a", 1, "200.00"), ("b", 1, "100.00")), 3_001)
++    assert [(s.profile_id, s.budget_cents, s.amount_cents) for s in before] == [
++        ("a", 10_000, 1_501),
++        ("b", 20_000, 1_500),
++    ]
++    assert [(s.profile_id, s.budget_cents, s.amount_cents) for s in after] == [
++        ("a", 20_000, 1_501),
++        ("b", 10_000, 1_500),
++    ]
++
++
++# --- unallocated units, preconditions, invariants ------------------------------------------
++
++
++def test_units_without_a_block_are_unallocated_with_their_reason(market):
++    pool = load_demand_pool(POOL_PATH)
++    poor = plan_lot(PlanningInput((request("user", "Tokyo", 1, "100"),), pool, REFERENCE), market)
++    assert ("user", "no_solo_reference") in [
++        (item.unit_id, item.reason) for item in poor.allocation.unallocated
++    ]
++    with pytest.raises(KeyError):
++        poor.allocation.block_for("user")
++    focus = (request("user", "Rome", 20, "400"), request("user-2", "Rome", 20, "400"))
++    violated = plan_lot(PlanningInput(focus, pool, REFERENCE), market)
++    assert violated.allocation.blocks == ()
++    assert {item.reason for item in violated.allocation.unallocated} == {"capacity_model_violated"}
++    small = PlanningInput(
++        (request("user", "Tokyo", 1, "520"),),
++        pool,
++        REFERENCE,
++        FormationLimits(max_component_units=4),
++    )
++    too_large = plan_lot(small, market)
++    assert {item.reason for item in too_large.allocation.unallocated} == {"component_too_large"}
++
++
++def test_a_missing_sub_coalition_is_a_precondition_error(tokyo_plan):
++    formation = tokyo_plan.formation
++    removed = ("pool-tyo-01", "pool-tyo-04")
++    partial = replace(
++        formation, evaluations=tuple(c for c in formation.evaluations if c.unit_ids != removed)
++    )
++    with pytest.raises(AllocationPreconditionError, match="was not evaluated"):
++        allocate_formation(partial, tokyo_plan.units)
++    with pytest.raises(AllocationPreconditionError, match="not in the lot"):
++        allocate_formation(formation, tokyo_plan.units[1:])
++
++
++@pytest.mark.parametrize(
++    ("target", "fake", "message"),
++    [
++        (
++            "round_largest_remainder",
++            lambda real: (
++                lambda values, total, upper: {
++                    k: v + (1 if i == 0 else 0)
++                    for i, (k, v) in enumerate(real(values, total, upper).items())
++                }
++            ),
++            "sum x' != c",
++        ),
++        (
++            "split_unit_payment",
++            lambda real: (
++                lambda unit, amount, clock=None: tuple(
++                    replace(s, amount_cents=s.amount_cents + 1) for s in real(unit, amount, clock)
++                )
++            ),
++            "do not sum",
++        ),
++        (
++            "split_unit_payment",
++            lambda real: (
++                lambda unit, amount, clock=None: tuple(
++                    replace(s, budget_cents=s.amount_cents - 1) for s in real(unit, amount, clock)
++                )
++            ),
++            "q' <= b",
++        ),
++        (
++            "shapley_exact",
++            lambda real: (
++                lambda members, values: replace(
++                    real(members, values),
++                    phi=tuple((u, v + 1) for u, v in real(members, values).phi),
++                )
++            ),
++            "do not sum to v",
++        ),
++    ],
++)
++def test_each_runtime_invariant_detects_its_violation(
++    monkeypatch, tokyo_plan, target, fake, message
++):
++    real = getattr(savings_allocation, target)
++    monkeypatch.setattr(savings_allocation, target, fake(real))
++    with pytest.raises(AllocationConsistencyError, match=message):
++        allocate_formation(tokyo_plan.formation, tokyo_plan.units)
++
++
++def test_payment_above_the_reference_is_refused(monkeypatch, tokyo_plan):
++    """Sum preserved, but 10 000 cents of savings moved from one unit to another."""
++    real = savings_allocation.round_largest_remainder
++
++    def shifted(values, total, upper):
++        result = real(values, total, upper)
++        keys = sorted(result)
++        if keys and isinstance(keys[0], str) and len(keys) > 1:  # unit level only
++            result[keys[0]] -= 10_000
++            result[keys[-1]] += 10_000
++        return result
++
++    monkeypatch.setattr(savings_allocation, "round_largest_remainder", shifted)
++    with pytest.raises(AllocationConsistencyError, match="0 <= x' <= ref <= B"):
++        allocate_formation(tokyo_plan.formation, tokyo_plan.units)
++
++
++# --- cover cache, zero oracle call, digest --------------------------------------------------
++
++
++def test_cover_cache_restricts_a_cached_component_cover(tokyo_plan):
++    game = tokyo_plan.formation.components[0].game
++    cache = CoverCache()
++    cache.component_cover(game)
++    reused = allocate_formation(tokyo_plan.formation, tokyo_plan.units, cover_cache=cache)
++    fresh = allocate_formation(tokyo_plan.formation, tokyo_plan.units)
++    assert reused.allocation_sha256 == fresh.allocation_sha256
++    assert (reused.counters.covers_computed, reused.counters.covers_reused) == (1, 1)
++    assert (fresh.counters.covers_computed, fresh.counters.covers_reused) == (1, 0)
++    other = game_of({"a": 10_000, "b": 10_000}, {("a", "b"): 5})
++    impostor = replace(other, component_id=game.component_id)  # same id, other game
++    with pytest.raises(AllocationConsistencyError, match="reused across games"):
++        cache.block_cover(impostor, ("a", "b"))
++
++
++def test_allocation_makes_no_oracle_call(market):
++    """A5: the oracle is armed to fail once the formation is done."""
++    pool = load_demand_pool(POOL_PATH)
++    units = tuple(
++        trip_planning.build_travel_unit(item.request_id, item.draft, REFERENCE)
++        for item in pool.requests
++        if item.draft.destination == "Tokyo"
++    )
++    session = market.open_session()
++
++    class Armed:
++        oracle_configuration_id = session.oracle_configuration_id
++        armed = False
++
++        def negotiate(self, negotiation_request):
++            if Armed.armed:
++                raise AssertionError("P5 called the oracle")
++            return session.negotiate(negotiation_request)
++
++    stages = run_formation_stages(units, market.catalog, REFERENCE, Armed())
++    Armed.armed = True
++    calls = session.oracle_calls
++    allocation = allocate_formation(stages.formation, units)
++    assert allocation.blocks and session.oracle_calls == calls
++
++
++def test_plan_lot_refuses_an_allocation_that_negotiates(monkeypatch, market):
++    sessions = []
++    real_open = market.open_session
++
++    class Recording:
++        catalog = market.catalog
++        reference_date = market.reference_date
++        oracle_configuration_id = market.oracle_configuration_id
++
++        def open_session(self):
++            sessions.append(real_open())
++            return sessions[-1]
++
++    def negotiating(formation, units):
++        offer = market.catalog.get("tyo-northstar-20270310")
++        sessions[-1].negotiate(negotiation_request_for((units[0],), offer))
++        return allocate_formation(formation, units)
++
++    monkeypatch.setattr(trip_planning, "allocate_formation", negotiating)
++    with pytest.raises(PlanConsistencyError, match="must not call"):
++        plan_lot(PlanningInput((request("user"),), None, REFERENCE), Recording())
++
++
++def test_digest_is_deterministic_and_carries_theta(tokyo_plan, market):
++    again = allocate_formation(tokyo_plan.formation, tokyo_plan.units)
++    assert again.allocation_sha256 == tokyo_plan.allocation.allocation_sha256
++    assert (
++        (again.allocation_version, again.theta_cents)
++        == (ALLOCATION_VERSION, THETA_CENTS)
++        == (
++            "p5-allocation-v1",
++            0,
++        )
++    )
++    content = canonical_allocation_content(
++        again.formation_run_id, again.blocks, again.shares, again.unallocated
++    )
++    assert content["theta_cents"] == 0 and content["allocation_version"] == ALLOCATION_VERSION
++    changed = canonical_allocation_content(
++        again.formation_run_id,
++        again.blocks,
++        tuple(replace(s, amount_cents=s.amount_cents + 1) for s in again.shares),
++        again.unallocated,
++    )
++    assert changed != content
++    assert {name for name, _ in again.durations_seconds} == set(savings_allocation.SUBSTEPS)
++
++
++def test_trip_plan_allocation_must_belong_to_its_formation(tokyo_plan, pinned_plan):
++    assert tokyo_plan.allocation.formation_run_id == tokyo_plan.formation.formation_run_id
++    with pytest.raises(PlanConsistencyError, match="belongs to the formation"):
++        replace(tokyo_plan, allocation=pinned_plan.allocation)
++    rejected = plan_lot(
++        PlanningInput(
++            (PlanningRequest("user", TravelRequestDraft(destination="Tokyo", travellers=2)),),
++            None,
++            REFERENCE,
++        ),
++        open_simulated_market(CATALOG_PATH, REFERENCE),
++    )
++    assert rejected.allocation is None
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/tests/test_savings_allocation_math.py b/tests/test_savings_allocation_math.py
+--- a/tests/test_savings_allocation_math.py	1970-01-01 01:00:00
++++ b/tests/test_savings_allocation_math.py	2026-11-19 18:45:38
+@@ -0,0 +1,381 @@
++"""I2 (P5): exact mathematics, object by object (scope review I2, §4 and §5.1).
++
++phi: Shapley axioms. y: projection properties. y': rounding properties. q: equal awards
++under caps (R1 to R7c). The Shapley axioms are never required of y, y' or q.
++"""
++
++import ast
++import itertools
++import random
++from fractions import Fraction
++from pathlib import Path
++
++import pytest
++from coalition_travel.domain.coalition_game import build_game
++from coalition_travel.domain.savings_allocation import (
++    AllocationMathError,
++    constrained_equal_awards,
++    max_core_excess,
++    project_onto_bounds,
++    round_largest_remainder,
++    shapley_exact,
++    values_by_mask,
++)
++from CoalitionStructureSearch import shapley_value
++from p4_support import TEST_CONFIGURATION, random_game
++
++PACKAGE = Path(__file__).resolve().parents[1] / "Multi-Agent" / "coalition_travel"
++
++
++def game_of(references, values):
++    """CoalitionGame from references and the values v(C) of the feasible coalitions."""
++    costs = {(unit,): reference for unit, reference in references.items()}
++    for size in range(2, len(references) + 1):
++        for coalition in itertools.combinations(sorted(references), size):
++            value = values.get(coalition)
++            costs[coalition] = (
++                None if value is None else sum(references[u] for u in coalition) - value
++            )
++    return build_game("component-test", references, costs, TEST_CONFIGURATION)
++
++
++def phi_of(game, block=None):
++    members = game.players if block is None else tuple(sorted(block))
++    masks = values_by_mask(members, game.cover_values(members))
++    return members, masks, dict(shapley_exact(members, masks).phi)
++
++
++def project(phi, value, references):
++    lower = dict.fromkeys(phi, 0)
++    return project_onto_bounds(phi, value, lower, dict(references))
++
++
++# --- reference examples E1, E2, E4, E5 (domain level), E6 ------------------------------------
++
++
++def test_e1_shapley_of_the_cover_game_is_4_4_1():
++    game = game_of({"a": 10_000, "b": 10_000, "c": 10_000}, {("a", "b"): 6, ("a", "b", "c"): 9})
++    _, _, phi = phi_of(game)
++    assert phi == {"a": 4, "b": 4, "c": 1}
++    projection = project(phi, 9, game.references)
++    assert dict(projection.y) == phi and projection.lambda_star == 0
++    assert not projection.active
++
++
++def test_e2_projection_avoids_a_negative_payment():
++    references = {"a": 100, "b": 1_000, "c": 1_000}
++    game = game_of(references, {("a", "b", "c"): 900})
++    _, _, phi = phi_of(game)
++    assert phi == {"a": 300, "b": 300, "c": 300}
++    projection = project(phi, 900, references)
++    assert dict(projection.y) == {"a": 100, "b": 400, "c": 400}
++    assert projection.lambda_star == -100
++    assert projection.saturated_high == ("a",)
++    payments = {u: references[u] - y for u, y in projection.y}
++    assert payments == {"a": 0, "b": 600, "c": 600}
++
++
++def test_e6_a_null_player_can_receive_savings_after_projection():
++    references = {"a": 100, "b": 1_000, "c": 1_000}
++    game = game_of(references, {("a", "b"): 900, ("a", "b", "c"): 900})
++    _, _, phi = phi_of(game)
++    assert phi == {"a": 450, "b": 450, "c": 0}  # c is a null player of v*
++    projection = project(phi, 900, references)
++    assert projection.lambda_star == -175
++    assert dict(projection.y) == {"a": 100, "b": 625, "c": 175}  # c receives 175 > 0
++    payments = {u: references[u] - y for u, y in projection.y}
++    assert payments == {"a": 0, "b": 375, "c": 825}
++
++
++def test_e4_individual_budgets_are_respected():
++    result = constrained_equal_awards(5_000, {"a": 1_000, "b": 10_000})
++    assert dict(result.amounts) == {"a": 1_000, "b": 4_000}
++    assert result.tau == 4_000 and result.saturated == ("a",)
++
++
++def test_e5_renaming_moves_the_cent_but_not_the_amounts():
++    def split(caps):
++        awards = constrained_equal_awards(3_001, caps)
++        return awards, round_largest_remainder(dict(awards.amounts), 3_001, caps)
++
++    awards, rounded = split({("a", 1): 10_000, ("b", 1): 20_000})
++    assert awards.tau == Fraction(3_001, 2) and awards.saturated == ()
++    assert rounded == {("a", 1): 1_501, ("b", 1): 1_500}
++    renamed, rounded_renamed = split({("a", 1): 20_000, ("b", 1): 10_000})
++    assert renamed.tau == awards.tau  # R7a
++    assert sorted(rounded_renamed.values()) == sorted(rounded.values())  # R7b
++    assert rounded_renamed[("a", 1)] == 1_501  # R7c: the seat budgeted 20 000 now gets it
++
++
++# --- phi: Shapley axioms, on cover games and on arbitrary games ---------------------------
++
++
++def random_cover_games(count=300, seed=7):
++    rng = random.Random(seed)
++    for index in range(count):
++        n = 2 + index % 5
++        yield random_game(rng, n, feasible_probability=rng.choice((0.3, 0.6, 0.9)))
++
++
++def test_phi_efficiency_and_non_negativity_on_300_cover_games():
++    for game in random_cover_games():
++        _, masks, phi = phi_of(game)
++        assert sum(phi.values()) == masks[-1]  # efficiency on v*
++        assert all(value >= 0 for value in phi.values())  # v* superadditive
++        assert all(type(value) is Fraction for value in phi.values())
++
++
++def arbitrary_games(count=300, seed=11):
++    """Mask-indexed games: (members, symmetric, null for p0, first, second)."""
++    rng = random.Random(seed)
++    for _ in range(count):
++        n = rng.randint(2, 6)
++        members = tuple(f"p{i}" for i in range(n))
++        # Values depending on |S| only make every pair symmetric; player 0 is made null.
++        by_size = [0] + [rng.randint(-500, 900) for _ in range(n)]
++        symmetric = [by_size[mask.bit_count()] for mask in range(1 << n)]
++        null = [symmetric[mask & ~1] for mask in range(1 << n)]  # ignore player p0
++        first = [0] + [rng.randint(-900, 900) for _ in range((1 << n) - 1)]
++        second = [0] + [rng.randint(-900, 900) for _ in range((1 << n) - 1)]
++        yield members, symmetric, null, first, second
++
++
++def test_phi_symmetry_null_player_and_additivity_on_arbitrary_games():
++    for members, symmetric, null, first, second in arbitrary_games():
++        phi = dict(shapley_exact(members, symmetric).phi)
++        assert len(set(phi.values())) == 1
++        assert dict(shapley_exact(members, null).phi)["p0"] == 0
++        total = [a + b for a, b in zip(first, second)]
++        phi_first = dict(shapley_exact(members, first).phi)
++        phi_second = dict(shapley_exact(members, second).phi)
++        phi_total = dict(shapley_exact(members, total).phi)
++        assert all(phi_total[u] == phi_first[u] + phi_second[u] for u in members)
++
++
++def test_differential_oracle_uses_the_same_cover_game():
++    """A4: the historical float shapley_value receives v*|C, never v.
++
++    Games: the 300 cover games of A2 (same generator, same seed), 300 more, E1. E3 is
++    checked on the block produced by plan_lot (test_savings_allocation.py).
++    """
++    games = list(random_cover_games()) + list(random_cover_games(count=300, seed=19))
++    games.append(
++        game_of({"a": 10_000, "b": 10_000, "c": 10_000}, {("a", "b"): 6, ("a", "b", "c"): 9})
++    )
++    for game in games:
++        members, _, phi = phi_of(game)
++        cover = game.cover_values(members)
++
++        def v_star(coalition, cover=cover):
++            return cover[tuple(sorted(coalition))] if coalition else 0
++
++        tolerance = 1e-6 * max(1, abs(cover[members]))
++        for unit in members:
++            assert abs(shapley_value(unit, members, v_star) - phi[unit]) <= tolerance
++
++
++def test_differential_oracle_on_the_arbitrary_games_of_a2():
++    """A4 on the arbitrary games of A2 (there v is given by mask, v* = v by construction)."""
++    for members, *games in arbitrary_games():
++        for values in games:
++            phi = dict(shapley_exact(members, values).phi)
++
++            def v(coalition, values=values, members=members):
++                return values[sum(1 << members.index(unit) for unit in coalition)]
++
++            tolerance = 1e-6 * max(1, abs(values[-1]))
++            for unit in members:
++                assert abs(shapley_value(unit, members, v) - phi[unit]) <= tolerance
++
++
++# --- y: projection properties --------------------------------------------------------------
++
++
++def random_projection(rng, total_equals_phi=True):
++    n = rng.randint(1, 7)
++    keys = [f"u{i}" for i in range(n)]
++    phi = {k: Fraction(rng.randint(0, 5_000), rng.randint(1, 12)) for k in keys}
++    upper = {k: rng.randint(0, 3_000) for k in keys}
++    if total_equals_phi:
++        total = sum(phi.values())
++        while sum(upper.values()) < total:
++            upper[rng.choice(keys)] += rng.randint(1, 3_000)
++    else:
++        total = Fraction(rng.randint(0, sum(upper.values()) * 7), 7)
++    return phi, total, upper
++
++
++def g(phi, upper, total, lam):
++    return sum(min(max(phi[k] - lam, 0), upper[k]) for k in phi) - total
++
++
++@pytest.mark.parametrize("total_equals_phi", [True, False])
++def test_projection_properties_on_300_instances(total_equals_phi):
++    rng = random.Random(23 if total_equals_phi else 29)
++    for _ in range(300):
++        phi, total, upper = random_projection(rng, total_equals_phi)
++        result = project_onto_bounds(phi, total, dict.fromkeys(phi, 0), upper)
++        y, lam = dict(result.y), result.lambda_star
++        assert sum(y.values()) == total  # conserved sum
++        assert all(0 <= y[k] <= upper[k] for k in y)  # bounds
++        assert all(y[k] == min(max(phi[k] - lam, 0), upper[k]) for k in y)  # KKT form
++        assert g(phi, upper, total, lam) == 0
++        if lam != 0:  # convention: no root strictly between 0 and lambda*
++            assert g(phi, upper, total, lam / 2) != 0
++        if all(0 <= phi[k] <= upper[k] for k in phi) and sum(phi.values()) == total:
++            assert y == phi and lam == 0  # no active bound
++        if total_equals_phi:
++            assert lam <= 0
++            assert all(y[k] >= min(phi[k], upper[k]) for k in y)  # floor of y
++        for a, b in itertools.combinations(phi, 2):  # conditional symmetry
++            if phi[a] == phi[b] and upper[a] == upper[b]:
++                assert y[a] == y[b]
++
++
++def test_projection_lambda_star_is_the_root_closest_to_zero_on_plateaus():
++    """Specification §9.5: when g is flat at zero, every lambda of the interval gives y;
++    the convention keeps the point of the interval closest to 0."""
++    # V = sum h: Lambda = (-inf, min(phi - h)] = (-inf, -2], so lambda* = -2.
++    left = project_onto_bounds(
++        {"a": Fraction(1), "b": Fraction(5)}, 7, {"a": 0, "b": 0}, {"a": 3, "b": 4}
++    )
++    assert left.lambda_star == -2 and dict(left.y) == {"a": 3, "b": 4}
++    # V = sum l = 0: Lambda = [max(phi), +inf) = [3, +inf), so lambda* = 3.
++    right = project_onto_bounds(
++        {"a": Fraction(2), "b": Fraction(3)}, 0, {"a": 0, "b": 0}, {"a": 9, "b": 9}
++    )
++    assert right.lambda_star == 3 and dict(right.y) == {"a": 0, "b": 0}
++
++
++def test_projection_refuses_an_infeasible_total():
++    with pytest.raises(AllocationMathError, match="infeasible"):
++        project_onto_bounds({"a": Fraction(5)}, 5, {"a": 0}, {"a": 4})
++
++
++# --- y': rounding properties --------------------------------------------------------------
++
++
++def test_rounding_properties_on_300_instances():
++    rng = random.Random(31)
++    for _ in range(300):
++        n = rng.randint(1, 8)
++        keys = [f"u{i}" for i in range(n)]
++        values = {k: Fraction(rng.randint(0, 9_000), rng.choice((1, 2, 3, 7))) for k in keys}
++        fractional = sum(values.values()) - int(sum(values.values()))
++        values[keys[0]] += 1 - fractional if fractional else 0  # make the total an integer
++        total = int(sum(values.values()))
++        upper = {k: int(values[k]) + 1 for k in keys}
++        rounded = round_largest_remainder(values, total, upper)
++        assert sum(rounded.values()) == total
++        for k in keys:
++            floor_k = values[k].numerator // values[k].denominator
++            assert rounded[k] in (floor_k, floor_k + 1) and rounded[k] <= upper[k]
++            if values[k].denominator == 1:
++                assert rounded[k] == values[k]  # no cent to an integral value
++
++
++def test_rounding_breaks_ties_by_ascending_key():
++    values = {"b": Fraction(1, 2), "a": Fraction(1, 2)}
++    assert round_largest_remainder(values, 1, {"a": 1, "b": 1}) == {"a": 1, "b": 0}
++
++
++# --- q: equal awards under caps (plan §6.1, R1 to R7c) -------------------------------------
++
++
++def test_equal_awards_properties_and_certificate_on_1000_units():
++    rng = random.Random(37)
++    for _ in range(1_000):
++        m = rng.randint(1, 20)
++        caps = {(f"p{rng.randint(0, 3)}", seat): rng.randint(1, 60_000) for seat in range(m)}
++        total = rng.randint(0, sum(caps.values()))
++        result = constrained_equal_awards(total, caps)
++        q, tau = dict(result.amounts), result.tau
++        assert sum(q.values()) == total  # R1
++        assert all(0 <= q[k] <= caps[k] for k in caps)  # R2
++        for s, t in itertools.combinations(caps, 2):
++            if caps[s] == caps[t]:
++                assert q[s] == q[t]  # R3
++            if caps[s] <= caps[t]:
++                assert q[s] <= q[t]  # R4
++            if q[s] < q[t]:
++                assert q[s] == caps[s]  # certificate of optimality
++            if q[t] < q[s]:
++                assert q[t] == caps[t]
++        if Fraction(total, m) <= min(caps.values()):
++            assert all(value == Fraction(total, m) for value in q.values())  # R5
++        assert all(q[k] == min(caps[k], tau) for k in caps)  # R6: b_s if b_s <= tau else tau
++        assert set(result.saturated) == {k for k in caps if caps[k] < tau}
++        # R7a and R7b under a random renaming of the keys.
++        keys = list(caps)
++        names = keys[:]
++        rng.shuffle(names)
++        renamed_caps = {names[i]: caps[keys[i]] for i in range(m)}
++        renamed = constrained_equal_awards(total, renamed_caps)
++        assert renamed.tau == tau
++        assert sorted(caps[k] for k in result.saturated) == sorted(
++            renamed_caps[k] for k in renamed.saturated
++        )
++        original_cents = round_largest_remainder(q, total, caps)
++        renamed_cents = round_largest_remainder(dict(renamed.amounts), total, renamed_caps)
++        assert sorted(original_cents.values()) == sorted(renamed_cents.values())
++
++
++def test_equal_awards_edge_cases():
++    assert dict(constrained_equal_awards(0, {"a": 5, "b": 9}).amounts) == {"a": 0, "b": 0}
++    full = constrained_equal_awards(14, {"a": 5, "b": 9})
++    assert dict(full.amounts) == {"a": 5, "b": 9} and full.tau == 9  # convention tau = max
++    one = constrained_equal_awards(7, {"a": 9})
++    assert dict(one.amounts) == {"a": 7} and one.tau == 7
++    with pytest.raises(AllocationMathError):
++        constrained_equal_awards(15, {"a": 5, "b": 9})
++
++
++# --- diagnostics and guards ---------------------------------------------------------------
++
++
++def test_max_core_excess_is_the_best_secession_gain():
++    members = ("a", "b", "c")
++    values = [0, 0, 0, 6, 0, 0, 0, 9]  # v*({a,b}) = 6, v*(C) = 9
++    y = {"a": Fraction(4), "b": Fraction(4), "c": Fraction(1)}
++    assert max_core_excess(members, values, y) == -1  # {a,b}: 6 - 8
++    assert max_core_excess(("a",), [0, 0], {"a": Fraction(0)}) is None
++
++
++def test_values_by_mask_requires_a_complete_cover():
++    with pytest.raises(AllocationMathError, match="every non-empty subset"):
++        values_by_mask(("a", "b"), {("a",): 0, ("b",): 0})
++
++
++def _module_tree(relative):
++    return ast.parse((PACKAGE / relative).read_text(encoding="utf-8"))
++
++
++def test_official_modules_never_use_the_historical_shapley_value():
++    for relative in ("domain/savings_allocation.py", "application/savings_allocation.py"):
++        tree = _module_tree(relative)
++        modules = {
++            node.module
++            for node in ast.walk(tree)
++            if isinstance(node, ast.ImportFrom) and node.module
++        } | {
++            alias.name
++            for node in ast.walk(tree)
++            if isinstance(node, ast.Import)
++            for alias in node.names
++        }
++        names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
++        assert not {
++            m for m in modules if "CoalitionStructureSearch" in m or "cooperative_game" in m
++        }
++        assert "shapley_value" not in names, relative
++
++
++def test_the_domain_module_produces_no_float():
++    tree = _module_tree("domain/savings_allocation.py")
++    floats = [
++        node
++        for node in ast.walk(tree)
++        if isinstance(node, ast.Constant) and type(node.value) is float
++    ]
++    assert not floats
++    assert "float" not in {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+diff -u a/docs/PHASE_I2_SCOPE_REVIEW.md b/docs/PHASE_I2_SCOPE_REVIEW.md
+--- a/docs/PHASE_I2_SCOPE_REVIEW.md	2026-11-19 23:00:05
++++ b/docs/PHASE_I2_SCOPE_REVIEW.md	2026-11-19 18:17:12
+@@ -46,7 +46,7 @@
+ | Préalable | État |
+ |---|---|
+ | I1 acceptée | fait |
+-| ID-6 (θ_u = 0, paiement minimal nul) confirmée par un addendum à la spécification | **addendum rédigé :** `docs/PHASE_P5_ADDENDUM_ID6.md`, à valider avec ce périmètre. C'est un fichier séparé : la spécification P4 n'est pas modifiée, ce qui préserve la preuve A9. L'addendum explicite une conséquence, qu'il faut valider en connaissance de cause : avec θ = 0, une unité peut payer 0 (exemple E2) |
++| ID-6 (θ_u = 0, paiement minimal nul) confirmée par un addendum à la spécification | **décision validée :** `docs/PHASE_P5_ADDENDUM_ID6.md`, validé avec le périmètre (§9.1). Formulation corrigée au démarrage d'I2 ; la correction figure dans le diff d'I2. C'est un fichier séparé : la spécification P4 n'est pas modifiée, ce qui préserve la preuve A9. L'addendum explicite une conséquence, qu'il faut valider en connaissance de cause : avec θ = 0, une unité peut payer 0 (exemple E2) |
+ | Base de référence | option A reconduite, sauf décision Git contraire (§7, D-I2-6) : manifeste SHA-256 et copie complète avant la première modification |
+ 
+ ---

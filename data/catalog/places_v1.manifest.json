@@ -1,0 +1,12 @@
+{
+  "version": "places-v1",
+  "places_file": "places_v1.json",
+  "places_sha256": "c73912b440ebb7aba7c71e3ade9d18f57c755ec5c189cdc78f0a3b6960eb4828",
+  "places": 3,
+  "purpose": "Closed directory of the places of catalog-v2 with their aliases (ID-11, plan section 6.5): a spelling in another language resolves to the canonical name before a unit is built.",
+  "limitations": [
+    "Covers the places of catalog-v2 only; it is not a general place normalizer (P7).",
+    "The v1 path (catalog-v1, requests without a route) never uses it.",
+    "Any edit requires updating places_sha256 here, and the loader refuses a mismatch."
+  ]
+}

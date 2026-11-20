@@ -1,0 +1,1580 @@
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/application/lot_admissibility.py b/Multi-Agent/coalition_travel/application/lot_admissibility.py
+--- a/Multi-Agent/coalition_travel/application/lot_admissibility.py	2026-11-19 05:59:19
++++ b/Multi-Agent/coalition_travel/application/lot_admissibility.py	2026-11-20 04:55:07
+@@ -138,14 +138,19 @@
+     units: Iterable[TravelUnit],
+     catalog: OfferCatalog,
+     reference_date: date,
+-    policy: AdmissibilityPolicy = AdmissibilityPolicy.NON_FINANCIAL_V1,
++    policy: AdmissibilityPolicy | None = None,
+ ) -> LotAdmissibilityResult:
+-    """Evaluate every unit × offer pair, keep the graph and diagnostics, check H2."""
++    """Evaluate every unit × offer pair, keep the graph and diagnostics, check H2.
++
++    Without an explicit policy, it is deduced from the lot (I4, D-I4-8): NON_FINANCIAL_V1
++    for v1 units and offers, NON_FINANCIAL_V2 for route units and packages. A lot that
++    mixes both kinds is refused (K9), and so is a policy that contradicts the lot.
++    """
+     if not isinstance(catalog, OfferCatalog):
+         raise LotInputError("catalog must be the public OfferCatalog")
+     if isinstance(reference_date, datetime) or not isinstance(reference_date, date):
+         raise LotInputError("reference_date must be a datetime.date, not datetime")
+-    if not isinstance(policy, AdmissibilityPolicy):
++    if policy is not None and not isinstance(policy, AdmissibilityPolicy):
+         raise LotInputError("policy must be an AdmissibilityPolicy")
+     materialized = tuple(units)
+     if not materialized:
+@@ -156,6 +161,19 @@
+     if len({unit.unit_id for unit in ordered_units}) != len(ordered_units):
+         raise LotInputError("unit_id values must be unique within a lot")
+     offers = catalog.offers
++    kinds = {unit.is_route_unit for unit in ordered_units}
++    kinds |= {offer.is_route_offer for offer in offers}
++    if len(kinds) != 1:
++        raise LotInputError("K9: a lot cannot mix v1 and route units or offers")
++    deduced = (
++        AdmissibilityPolicy.NON_FINANCIAL_V2
++        if kinds == {True}
++        else AdmissibilityPolicy.NON_FINANCIAL_V1
++    )
++    if policy is None:
++        policy = deduced
++    elif policy is not deduced:
++        raise LotInputError("the policy contradicts the units and offers of the lot")
+ 
+     results = tuple(
+         evaluate_unit_offer(unit, offer, reference_date, policy)
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/application/request_understanding.py b/Multi-Agent/coalition_travel/application/request_understanding.py
+--- a/Multi-Agent/coalition_travel/application/request_understanding.py	2026-11-19 01:03:04
++++ b/Multi-Agent/coalition_travel/application/request_understanding.py	2026-11-20 05:00:50
+@@ -6,7 +6,7 @@
+ from time import perf_counter
+ from typing import Literal, Protocol
+ 
+-from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.request_contracts import TravelRequestDraft, is_route_request
+ 
+ 
+ class RequestExtractionError(RuntimeError):
+@@ -52,6 +52,20 @@
+ 
+ 
+ REQUIRED_FIELDS = ("destination", "travellers", "budget_per_person")
++# v2 (route) requests, scope review I4, D-I4-3: closed windows; the return window is
++# required for a round trip only. The order is the order of the clarification questions.
++REQUIRED_FIELDS_V2 = (
++    "origin",
++    "destination",
++    "travellers",
++    "budget_per_person",
++    "trip_type",
++    "departure_after",
++    "departure_before",
++    "return_after",
++    "return_before",
++)
++_RETURN_FIELDS = ("return_after", "return_before")
+ 
+ 
+ def validate_request_draft(
+@@ -61,7 +75,10 @@
+     """Apply deterministic business checks after schema validation."""
+     if not isinstance(reference_date, date) or isinstance(reference_date, datetime):
+         raise TypeError("reference_date must be a date")
+-    missing = tuple(field for field in REQUIRED_FIELDS if getattr(request, field) is None)
++    if is_route_request(request):  # v2 (I4, D-I4-1); the v1 rule below is unchanged
++        missing = _route_missing_fields(request)
++    else:
++        missing = tuple(field for field in REQUIRED_FIELDS if getattr(request, field) is None)
+     if missing:
+         return RequestUnderstandingResult(
+             status="needs_clarification", request=request, missing_fields=missing
+@@ -83,9 +100,106 @@
+             errors.append(f"profile {profile.profile_id}: departure_after is before reference date")
+         if profile.arrival_before and profile.arrival_before < reference_date:
+             errors.append(f"profile {profile.profile_id}: arrival_before is before reference date")
++    if is_route_request(request):
++        errors.extend(_route_errors(request, reference_date))
+     if errors:
+         return RequestUnderstandingResult(status="invalid", request=request, errors=tuple(errors))
+     return RequestUnderstandingResult(status="ready", request=request)
++
++
++def _route_missing_fields(request: TravelRequestDraft) -> tuple[str, ...]:
++    """A window bound is present when the request sets it, or when every profile does:
++    the effective window of each traveller is then closed (D-I4-3)."""
++    required = [name for name in REQUIRED_FIELDS_V2 if name not in _RETURN_FIELDS]
++    if request.trip_type == "round_trip":
++        required.extend(_RETURN_FIELDS)
++
++    def present(name: str) -> bool:
++        if getattr(request, name) is not None:
++            return True
++        return (
++            name in _WINDOW_FIELDS
++            and bool(request.profiles)
++            and all(getattr(profile, name) is not None for profile in request.profiles)
++        )
++
++    return tuple(name for name in REQUIRED_FIELDS_V2 if name in required and not present(name))
++
++
++_WINDOW_FIELDS = ("departure_after", "departure_before", "return_after", "return_before")
++
++
++def _route_errors(request: TravelRequestDraft, reference_date: date) -> list[str]:
++    """Deterministic v2 checks with fixed messages (domain E of trip-request-status-v2)."""
++    errors = []
++    for name in ("departure_before", "return_after", "return_before"):
++        value = getattr(request, name)
++        if value is not None and value < reference_date:
++            errors.append(f"{name} must not be before the reference date")
++    request_windows = (
++        request.departure_after,
++        request.departure_before,
++        request.return_after,
++        request.return_before,
++    )
++    errors.extend(_window_errors(request.trip_type, *request_windows, prefix=""))
++    for profile in request.profiles:
++        overrides = (profile.departure_after, *(getattr(profile, n) for n in _PROFILE_WINDOWS))
++        if all(value is None for value in overrides):
++            continue
++        for name in _PROFILE_WINDOWS:
++            value = getattr(profile, name)
++            if value is not None and value < reference_date:
++                errors.append(f"profile {profile.profile_id}: {name} is before reference date")
++        effective = tuple(
++            override if override is not None else inherited
++            for override, inherited in zip(overrides, request_windows)
++        )
++        own = profile.return_after is not None or profile.return_before is not None
++        errors.extend(
++            _window_errors(
++                request.trip_type,
++                *effective,
++                prefix=f"profile {profile.profile_id}: ",
++                own_return=own,
++            )
++        )
++    return errors
++
++
++_PROFILE_WINDOWS = ("departure_before", "return_after", "return_before")
++
++
++def _window_errors(
++    trip_type,
++    departure_after,
++    departure_before,
++    return_after,
++    return_before,
++    *,
++    prefix,
++    own_return=True,
++) -> list[str]:
++    errors = []
++    if prefix == "":
++        if departure_after and departure_before and departure_after > departure_before:
++            errors.append("departure_after must not be after departure_before")
++        if return_after and return_before and return_after > return_before:
++            errors.append("return_after must not be after return_before")
++        if trip_type == "one_way" and (return_after or return_before):
++            errors.append("a one_way request must not have a return window")
++        if return_before and departure_after and return_before < departure_after:
++            errors.append("the return window must not end before the departure window starts")
++        return errors
++    if departure_after and departure_before and departure_after > departure_before:
++        errors.append(f"{prefix}the departure window is empty")
++    if return_after and return_before and return_after > return_before:
++        errors.append(f"{prefix}the return window is empty")
++    if trip_type == "one_way" and own_return:
++        errors.append(f"{prefix}a one_way request must not have a return window")
++    if return_before and departure_after and return_before < departure_after:
++        errors.append(f"{prefix}the return window ends before the departure window starts")
++    return errors
+ 
+ 
+ async def understand_request(
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/application/trip_planning.py b/Multi-Agent/coalition_travel/application/trip_planning.py
+--- a/Multi-Agent/coalition_travel/application/trip_planning.py	2026-11-19 18:20:35
++++ b/Multi-Agent/coalition_travel/application/trip_planning.py	2026-11-20 04:57:07
+@@ -255,8 +255,11 @@
+ 
+ 
+ def route_key(unit: TravelUnit) -> str:
+-    """Route of a unit for lot selection. v1: destination key (I4 adds origin and type)."""
+-    return unit.destination_key
++    """Route of a unit for lot selection. v1: the destination key, unchanged. A route unit
++    (I4) adds its origin and trip type, so a lot never mixes two routes."""
++    if not unit.is_route_unit:
++        return unit.destination_key
++    return f"{unit.origin_key}>{unit.destination_key}|{unit.trip_type}"
+ 
+ 
+ def verify_journal_invariants(
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/domain/admissibility.py b/Multi-Agent/coalition_travel/domain/admissibility.py
+--- a/Multi-Agent/coalition_travel/domain/admissibility.py	2026-11-19 04:40:01
++++ b/Multi-Agent/coalition_travel/domain/admissibility.py	2026-11-20 04:54:54
+@@ -28,6 +28,7 @@
+     """Closed set of supported admissibility policies."""
+ 
+     NON_FINANCIAL_V1 = "non_financial_v1"
++    NON_FINANCIAL_V2 = "non_financial_v2"  # route packages (plan §6.2, I4)
+ 
+ 
+ class AdmissibilityRuleId(str, Enum):
+@@ -38,6 +39,9 @@
+     DIRECT_FLIGHT = "direct_flight"
+     SUPPLIER_EXCLUSION = "supplier_exclusion"
+     UNIT_CAPACITY = "unit_capacity"
++    ORIGIN = "origin"  # v2 only
++    TRIP_TYPE = "trip_type"  # v2 only
++    RETURN_WINDOW = "return_window"  # v2 only
+ 
+ 
+ RULE_ORDER = (
+@@ -51,11 +55,34 @@
+ )
+ # Hard constraints that no registered policy may drop.
+ MANDATORY_RULES = frozenset(RULE_ORDER)
++# v2 (plan §6.2): the v1 rules in the same relative order, plus the route rules.
++RULE_ORDER_V2 = (
++    AdmissibilityRuleId.DESTINATION,
++    AdmissibilityRuleId.ORIGIN,
++    AdmissibilityRuleId.TRIP_TYPE,
++    AdmissibilityRuleId.OFFER_NOT_BEFORE_REFERENCE,
++    AdmissibilityRuleId.DEPARTURE_WINDOW,
++    AdmissibilityRuleId.ARRIVAL_WINDOW,
++    AdmissibilityRuleId.RETURN_WINDOW,
++    AdmissibilityRuleId.DIRECT_FLIGHT,
++    AdmissibilityRuleId.SUPPLIER_EXCLUSION,
++    AdmissibilityRuleId.UNIT_CAPACITY,
++)
++MANDATORY_RULES_V2 = frozenset(RULE_ORDER_V2)
+ 
+ # MappingProxyType plus tuple/Enum values makes both the registry and its values read-only.
+ RULE_REGISTRY: Mapping[AdmissibilityPolicy, tuple[AdmissibilityRuleId, ...]] = MappingProxyType(
+-    {AdmissibilityPolicy.NON_FINANCIAL_V1: RULE_ORDER}
++    {
++        AdmissibilityPolicy.NON_FINANCIAL_V1: RULE_ORDER,
++        AdmissibilityPolicy.NON_FINANCIAL_V2: RULE_ORDER_V2,
++    }
+ )
++_EXPECTED_RULES = MappingProxyType(
++    {
++        AdmissibilityPolicy.NON_FINANCIAL_V1: (RULE_ORDER, MANDATORY_RULES),
++        AdmissibilityPolicy.NON_FINANCIAL_V2: (RULE_ORDER_V2, MANDATORY_RULES_V2),
++    }
++)
+ 
+ RejectionReason = Literal[
+     "destination_mismatch",
+@@ -65,6 +92,11 @@
+     "direct_flight_required",
+     "excluded_supplier",
+     "unit_exceeds_offer_capacity",
++    "origin_mismatch",
++    "trip_type_mismatch",
++    "departure_after_window",
++    "return_before_window",
++    "return_after_window",
+ ]
+ NoteCode = Literal["direct_preference_not_met"]
+ 
+@@ -79,12 +111,24 @@
+         AdmissibilityRuleId.UNIT_CAPACITY: "unit_exceeds_offer_capacity",
+     }
+ )
++# Every reason a rule may give, v1 and v2. The v1 mapping above is unchanged; a v2 window
++# rule has two reasons: the code says where the offer lies relative to the window.
++RULE_REASONS_V2: Mapping[AdmissibilityRuleId, tuple[str, ...]] = MappingProxyType(
++    {
++        **{rule: (reason,) for rule, reason in RULE_REASONS.items()},
++        AdmissibilityRuleId.DEPARTURE_WINDOW: ("departure_before_window", "departure_after_window"),
++        AdmissibilityRuleId.ORIGIN: ("origin_mismatch",),
++        AdmissibilityRuleId.TRIP_TYPE: ("trip_type_mismatch",),
++        AdmissibilityRuleId.RETURN_WINDOW: ("return_before_window", "return_after_window"),
++    }
++)
+ PROFILE_LEVEL_RULES = frozenset(
+     {
+         AdmissibilityRuleId.DEPARTURE_WINDOW,
+         AdmissibilityRuleId.ARRIVAL_WINDOW,
+         AdmissibilityRuleId.DIRECT_FLIGHT,
+         AdmissibilityRuleId.SUPPLIER_EXCLUSION,
++        AdmissibilityRuleId.RETURN_WINDOW,
+     }
+ )
+ NOTE_CODES = frozenset({"direct_preference_not_met"})
+@@ -92,8 +136,8 @@
+ 
+ def _violation_sort_key(violation: "AdmissibilityViolation") -> tuple:
+     """Rule order, then unit-level (no profile) before profile-level, then profile_id."""
+-    return (
+-        RULE_ORDER.index(violation.rule),
++    return (  # RULE_ORDER_V2 keeps the relative order of the v1 rules
++        RULE_ORDER_V2.index(violation.rule),
+         violation.profile_id is not None,
+         violation.profile_id or "",
+     )
+@@ -108,7 +152,7 @@
+     def __post_init__(self):
+         if not isinstance(self.rule, AdmissibilityRuleId):
+             raise TypeError("rule must be an AdmissibilityRuleId")
+-        if self.reason != RULE_REASONS[self.rule]:
++        if self.reason not in RULE_REASONS_V2[self.rule]:
+             raise ValueError(f"reason {self.reason!r} does not belong to rule {self.rule.value}")
+         if self.rule in PROFILE_LEVEL_RULES:
+             if type(self.profile_id) is not str or not self.profile_id:
+@@ -195,8 +239,14 @@
+     if not isinstance(policy, AdmissibilityPolicy):
+         raise TypeError("policy must be an AdmissibilityPolicy")
+     rules = RULE_REGISTRY[policy]
+-    if not MANDATORY_RULES <= set(rules) or rules != RULE_ORDER:
++    expected, mandatory = _EXPECTED_RULES[policy]
++    if not mandatory <= set(rules) or rules != expected:
+         raise RuntimeError("admissibility rule registry is inconsistent")
++    route = unit.is_route_unit or offer.is_route_offer
++    if (policy is AdmissibilityPolicy.NON_FINANCIAL_V2) != route:
++        raise ValueError("a route unit or package needs NON_FINANCIAL_V2, and only them")
++    if route:
++        return _evaluate_route(unit, offer, reference_date, policy)
+ 
+     # Re-normalize both inputs here rather than trusting constructors or cached keys.
+     if normalize_destination_key(unit.destination_key) != normalize_destination_key(
+@@ -256,6 +306,97 @@
+             AdmissibilityViolation(AdmissibilityRuleId.UNIT_CAPACITY, "unit_exceeds_offer_capacity")
+         )
+ 
++    notes = tuple(
++        AdmissibilityNote("direct_preference_not_met", profile.profile_id)
++        for profile in profiles
++        if profile.direct_flight == "preferred" and not offer.direct
++    )
++    return PairAdmissibility(
++        unit.unit_id, offer.offer_id, policy, not violations, tuple(violations), notes
++    )
++
++
++def _evaluate_route(unit, offer, reference_date, policy) -> PairAdmissibility:
++    """NON_FINANCIAL_V2 (plan §6.2): the v1 rules on the outbound leg, plus the route.
++
++    A route mismatch (destination and/or origin) is the only violation reported for its
++    pair, as the destination mismatch is in v1. Return windows apply to a round trip.
++    """
++    if not (unit.is_route_unit and offer.is_route_offer):
++        raise ValueError("NON_FINANCIAL_V2 compares a route unit with a package")
++    rule = AdmissibilityRuleId
++    route = []
++    if normalize_destination_key(unit.destination_key) != offer.destination_key:
++        route.append(AdmissibilityViolation(rule.DESTINATION, "destination_mismatch"))
++    if normalize_destination_key(unit.origin_key) != offer.origin_key:
++        route.append(AdmissibilityViolation(rule.ORIGIN, "origin_mismatch"))
++    if route:
++        return PairAdmissibility(unit.unit_id, offer.offer_id, policy, False, tuple(route))
++
++    profiles = tuple(sorted(unit.profiles, key=lambda profile: profile.profile_id))
++    violations: list[AdmissibilityViolation] = []
++    if unit.trip_type != offer.trip_type:
++        violations.append(AdmissibilityViolation(rule.TRIP_TYPE, "trip_type_mismatch"))
++    if offer.departure_date < reference_date:
++        violations.append(
++            AdmissibilityViolation(
++                rule.OFFER_NOT_BEFORE_REFERENCE, "offer_departs_before_reference_date"
++            )
++        )
++    for profile in profiles:
++        if profile.departure_after is not None and offer.departure_date < profile.departure_after:
++            violations.append(
++                AdmissibilityViolation(
++                    rule.DEPARTURE_WINDOW, "departure_before_window", profile.profile_id
++                )
++            )
++        elif (
++            profile.departure_before is not None and offer.departure_date > profile.departure_before
++        ):
++            violations.append(
++                AdmissibilityViolation(
++                    rule.DEPARTURE_WINDOW, "departure_after_window", profile.profile_id
++                )
++            )
++    for profile in profiles:
++        if profile.arrival_before is not None and offer.arrival_date > profile.arrival_before:
++            violations.append(
++                AdmissibilityViolation(
++                    rule.ARRIVAL_WINDOW, "arrival_after_window", profile.profile_id
++                )
++            )
++    back = offer.return_leg
++    for profile in profiles if back is not None else ():
++        if profile.return_after is not None and back.departure_date < profile.return_after:
++            violations.append(
++                AdmissibilityViolation(
++                    rule.RETURN_WINDOW, "return_before_window", profile.profile_id
++                )
++            )
++        elif profile.return_before is not None and back.departure_date > profile.return_before:
++            violations.append(
++                AdmissibilityViolation(
++                    rule.RETURN_WINDOW, "return_after_window", profile.profile_id
++                )
++            )
++    for profile in profiles:
++        if profile.direct_flight == "required" and not offer.direct:
++            violations.append(
++                AdmissibilityViolation(
++                    rule.DIRECT_FLIGHT, "direct_flight_required", profile.profile_id
++                )
++            )
++    supplier = normalize_supplier_key(offer.supplier_id)
++    for profile in profiles:
++        excluded = {normalize_supplier_key(item) for item in profile.excluded_suppliers}
++        if supplier in excluded:
++            violations.append(
++                AdmissibilityViolation(
++                    rule.SUPPLIER_EXCLUSION, "excluded_supplier", profile.profile_id
++                )
++            )
++    if unit.seats > offer.capacity_seats:
++        violations.append(AdmissibilityViolation(rule.UNIT_CAPACITY, "unit_exceeds_offer_capacity"))
+     notes = tuple(
+         AdmissibilityNote("direct_preference_not_met", profile.profile_id)
+         for profile in profiles
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/infrastructure/catalog/json_catalog.py b/Multi-Agent/coalition_travel/infrastructure/catalog/json_catalog.py
+--- a/Multi-Agent/coalition_travel/infrastructure/catalog/json_catalog.py	2026-11-19 03:45:02
++++ b/Multi-Agent/coalition_travel/infrastructure/catalog/json_catalog.py	2026-11-20 04:55:38
+@@ -18,6 +18,7 @@
+ 
+ from coalition_travel.domain.offer import (
+     OfferCatalog,
++    OfferLeg,
+     OfferQuote,
+     PriceTier,
+     SellerFloorTier,
+@@ -53,6 +54,15 @@
+     }
+ )
+ SUPPORTED_CURRENCY = "EUR"
++# Catalogue v2 (plan §6.2, I4): round-trip packages. A file is v2 exactly when it has the
++# top-level key "format"; a v1 file is read by the v1 parser, unchanged.
++CATALOG_V2_FORMAT = "offer-catalog-v2"
++CATALOG_V2_KEYS = frozenset({"format", "catalog_version", "currency", "synthetic", "offers"})
++OFFER_V2_KEYS = frozenset(
++    {"offer_id", "supplier_id", "origin", "destination", "outbound", "capacity_seats", "tiers"}
++)
++OFFER_V2_OPTIONAL_KEYS = frozenset({"return"})
++LEG_KEYS = frozenset({"departure_date", "arrival_date", "direct", "capacity_seats", "leg_ref"})
+ _DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
+ _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
+ 
+@@ -73,7 +83,10 @@
+         raise CatalogValidationError(f"missing catalogue manifest: {manifest_path}")
+     manifest = _strict_json(_read_bytes(manifest_path), str(manifest_path))
+ 
+-    version, offers, terms = _parse_catalog(document, str(catalog_path))
++    if isinstance(document, dict) and "format" in document:  # package catalogue (I4)
++        version, offers, terms = _parse_catalog_v2(document, str(catalog_path))
++    else:
++        version, offers, terms = _parse_catalog(document, str(catalog_path))
+     _check_manifest(manifest, str(manifest_path), catalog_path.name, sha256, version, len(offers))
+ 
+     try:
+@@ -213,6 +226,100 @@
+                     direct=_boolean(item["direct"], f"{location}.direct"),
+                     capacity_seats=capacity,
+                     tiers=tuple(PriceTier(seats, price) for seats, price in price_tiers),
++                )
++            )
++            terms.append(
++                SellerTerms(
++                    offer_id=offer_id,
++                    catalog_version=version,
++                    capacity_seats=capacity,
++                    floor_tiers=tuple(
++                        SellerFloorTier(seats, floor) for seats, floor in floor_tiers
++                    ),
++                )
++            )
++        except (TypeError, ValueError) as exc:
++            if isinstance(exc, CatalogValidationError):
++                raise
++            raise CatalogValidationError(f"{location}: {exc}") from exc
++    return version, offers, terms
++
++
++def _tiers(raw_tiers, location):
++    if type(raw_tiers) is not list or not raw_tiers:
++        raise CatalogValidationError(f"{location}.tiers: expected a non-empty list")
++    price_tiers, floor_tiers = [], []
++    for tier_index, raw_tier in enumerate(raw_tiers):
++        tier_location = f"{location}.tiers[{tier_index}]"
++        tier = _object(raw_tier, TIER_KEYS, tier_location)
++        seats = _integer(tier["min_seats"], f"{tier_location}.min_seats")
++        list_price = _integer(tier["list_per_seat_cents"], f"{tier_location}.list")
++        floor = _integer(tier["seller_floor_per_seat_cents"], f"{tier_location}.floor")
++        price_tiers.append((seats, list_price))
++        floor_tiers.append((seats, floor))
++    return price_tiers, floor_tiers
++
++
++def _leg(value, location) -> OfferLeg:
++    """A complete leg; a partial block is refused (plan §6.2)."""
++    item = _object(value, LEG_KEYS, location)
++    return OfferLeg(
++        departure_date=_iso_date(item["departure_date"], f"{location}.departure_date"),
++        arrival_date=_iso_date(item["arrival_date"], f"{location}.arrival_date"),
++        direct=_boolean(item["direct"], f"{location}.direct"),
++        capacity_seats=_integer(item["capacity_seats"], f"{location}.capacity_seats"),
++        leg_ref=_string(item["leg_ref"], f"{location}.leg_ref"),
++    )
++
++
++def _parse_catalog_v2(document, origin: str):
++    """Packages: C1 to C5 are checked by OfferQuote, C6 by OfferCatalog. The reader computes
++    ``direct`` (C3) and refuses a declared capacity that differs from C2, never fixing it."""
++    root = _object(document, CATALOG_V2_KEYS, origin)
++    if root["format"] != CATALOG_V2_FORMAT:
++        raise CatalogValidationError(f"{origin}.format: only {CATALOG_V2_FORMAT} is supported")
++    version = _string(root["catalog_version"], f"{origin}.catalog_version")
++    if root["currency"] != SUPPORTED_CURRENCY:
++        raise CatalogValidationError(f"{origin}.currency: only {SUPPORTED_CURRENCY} is supported")
++    if root["synthetic"] is not True:
++        raise CatalogValidationError(f"{origin}.synthetic: the catalogue must be synthetic")
++    raw_offers = root["offers"]
++    if type(raw_offers) is not list or not raw_offers:
++        raise CatalogValidationError(f"{origin}.offers: expected a non-empty list")
++    offers, terms = [], []
++    for index, raw_offer in enumerate(raw_offers):
++        location = f"{origin}.offers[{index}]"
++        if not isinstance(raw_offer, dict):
++            raise CatalogValidationError(f"{location}: expected an object")
++        keys = set(raw_offer)
++        missing = sorted(OFFER_V2_KEYS - keys)
++        unknown = sorted(keys - OFFER_V2_KEYS - OFFER_V2_OPTIONAL_KEYS)
++        if missing or unknown:
++            raise CatalogValidationError(f"{location}: missing {missing}, unknown {unknown}")
++        offer_id = _string(raw_offer["offer_id"], f"{location}.offer_id")
++        location = f"{location} ({offer_id})"
++        price_tiers, floor_tiers = _tiers(raw_offer["tiers"], location)
++        capacity = _integer(raw_offer["capacity_seats"], f"{location}.capacity_seats")
++        try:
++            outbound = _leg(raw_offer["outbound"], f"{location}.outbound")
++            back = (
++                _leg(raw_offer["return"], f"{location}.return") if "return" in raw_offer else None
++            )
++            legs = (outbound,) if back is None else (outbound, back)
++            offers.append(
++                OfferQuote(
++                    offer_id=offer_id,
++                    catalog_version=version,
++                    supplier_id=_string(raw_offer["supplier_id"], f"{location}.supplier_id"),
++                    destination=_string(raw_offer["destination"], f"{location}.destination"),
++                    departure_date=outbound.departure_date,
++                    arrival_date=outbound.arrival_date,
++                    direct=all(leg.direct for leg in legs),
++                    capacity_seats=capacity,
++                    tiers=tuple(PriceTier(seats, price) for seats, price in price_tiers),
++                    origin=_string(raw_offer["origin"], f"{location}.origin"),
++                    outbound=outbound,
++                    return_leg=back,
+                 )
+             )
+             terms.append(
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/infrastructure/catalog/places.py b/Multi-Agent/coalition_travel/infrastructure/catalog/places.py
+--- a/Multi-Agent/coalition_travel/infrastructure/catalog/places.py	1970-01-01 01:00:00
++++ b/Multi-Agent/coalition_travel/infrastructure/catalog/places.py	2026-11-20 04:55:56
+@@ -0,0 +1,95 @@
++"""Strict loader of the closed place directory ``places_v1.json`` (ID-11, plan §6.5, I4).
++
++The file is read once; its SHA-256 is computed on those bytes and checked against the
++manifest ``places_v1.manifest.json``, with the same strict JSON reader as the catalogue
++(no decimal number, no NaN, no duplicate key). ``check_catalog_places`` ties the
++directory to a package catalogue: every origin and destination must be a canonical name.
++"""
++
++import hashlib
++import re
++from pathlib import Path
++
++from coalition_travel.domain.offer import OfferCatalog
++from coalition_travel.domain.places import Place, PlaceDirectory, PlaceDirectoryError
++from coalition_travel.infrastructure.catalog.json_catalog import (
++    CatalogValidationError,
++    _integer,
++    _object,
++    _read_bytes,
++    _strict_json,
++    _string,
++)
++
++DIRECTORY_KEYS = frozenset({"version", "places"})
++PLACE_KEYS = frozenset({"name", "aliases"})
++MANIFEST_KEYS = frozenset(
++    {"version", "places_file", "places_sha256", "places", "purpose", "limitations"}
++)
++_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
++
++
++def load_place_directory(path: str | Path) -> PlaceDirectory:
++    """Read the directory and its manifest; refuse any inconsistency."""
++    directory_path = Path(path)
++    raw = _read_bytes(directory_path)
++    sha256 = hashlib.sha256(raw).hexdigest()
++    origin = str(directory_path)
++    root = _object(_strict_json(raw, origin), DIRECTORY_KEYS, origin)
++    version = _string(root["version"], f"{origin}.version")
++    raw_places = root["places"]
++    if type(raw_places) is not list or not raw_places:
++        raise CatalogValidationError(f"{origin}.places: expected a non-empty list")
++    places = []
++    for index, raw_place in enumerate(raw_places):
++        location = f"{origin}.places[{index}]"
++        item = _object(raw_place, PLACE_KEYS, location)
++        aliases = item["aliases"]
++        if type(aliases) is not list:
++            raise CatalogValidationError(f"{location}.aliases: expected a list")
++        places.append(
++            (
++                _string(item["name"], f"{location}.name"),
++                tuple(_string(alias, f"{location}.aliases") for alias in aliases),
++            )
++        )
++    try:
++        directory = PlaceDirectory(version, tuple(Place(name, aliases) for name, aliases in places))
++    except PlaceDirectoryError as exc:
++        raise CatalogValidationError(f"{origin}: {exc}") from exc
++
++    manifest_path = directory_path.with_suffix(".manifest.json")
++    if not manifest_path.is_file():
++        raise CatalogValidationError(f"missing place directory manifest: {manifest_path}")
++    manifest_origin = str(manifest_path)
++    manifest = _object(
++        _strict_json(_read_bytes(manifest_path), manifest_origin), MANIFEST_KEYS, manifest_origin
++    )
++    if manifest["version"] != version:
++        raise CatalogValidationError(f"{manifest_origin}: version does not match the directory")
++    if manifest["places_file"] != directory_path.name:
++        raise CatalogValidationError(f"{manifest_origin}: places_file does not name the file")
++    declared = manifest["places_sha256"]
++    if type(declared) is not str or not _SHA256_PATTERN.fullmatch(declared):
++        raise CatalogValidationError(f"{manifest_origin}: places_sha256 must be a SHA-256")
++    if declared != sha256:
++        raise CatalogValidationError(f"{manifest_origin}: places_sha256 does not match the file")
++    if _integer(manifest["places"], f"{manifest_origin}.places") != len(directory.places):
++        raise CatalogValidationError(f"{manifest_origin}: places count does not match")
++    _string(manifest["purpose"], f"{manifest_origin}.purpose")
++    limitations = manifest["limitations"]
++    if type(limitations) is not list or not limitations:
++        raise CatalogValidationError(f"{manifest_origin}.limitations: expected a non-empty list")
++    for index, limitation in enumerate(limitations):
++        _string(limitation, f"{manifest_origin}.limitations[{index}]")
++    return directory
++
++
++def check_catalog_places(catalog: OfferCatalog, directory: PlaceDirectory) -> None:
++    """Every origin and destination of a package catalogue is a canonical place name."""
++    for offer in catalog.offers:
++        for spelling in (offer.origin, offer.destination):
++            if spelling is None or directory.resolve(spelling) != spelling:
++                raise CatalogValidationError(
++                    f"offer {offer.offer_id}: {spelling!r} is not a canonical place name"
++                )
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/tests/test_i4_catalog_admissibility.py b/tests/test_i4_catalog_admissibility.py
+--- a/tests/test_i4_catalog_admissibility.py	1970-01-01 01:00:00
++++ b/tests/test_i4_catalog_admissibility.py	2026-11-20 05:01:00
+@@ -0,0 +1,590 @@
++"""I4-B: catalogue v2 (C1 to C6, H-forfait), place directory, NON_FINANCIAL_V2, policy
++deduction (K9), route validation and the frozen v2 data."""
++
++import hashlib
++import json
++from dataclasses import replace
++from datetime import date
++from pathlib import Path
++
++import pytest
++from coalition_travel.application.lot_admissibility import LotInputError, lot_admissibility
++from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.request_understanding import (
++    REQUIRED_FIELDS_V2,
++    validate_request_draft,
++)
++from coalition_travel.application.travel_units import build_travel_unit
++from coalition_travel.application.trip_planning import (
++    PlanningInput,
++    PlanningRequest,
++    plan_lot,
++    route_key,
++)
++from coalition_travel.domain.admissibility import (
++    RULE_ORDER,
++    RULE_ORDER_V2,
++    RULE_REGISTRY,
++    AdmissibilityPolicy,
++    evaluate_unit_offer,
++)
++from coalition_travel.infrastructure.catalog.json_catalog import (
++    CatalogValidationError,
++    load_offer_catalog,
++)
++from coalition_travel.infrastructure.catalog.places import (
++    check_catalog_places,
++    load_place_directory,
++)
++from coalition_travel.infrastructure.demand.demand_pool import load_demand_pool
++from coalition_travel.infrastructure.negotiation.market import open_simulated_market
++from p4_support import REFERENCE
++
++ROOT = Path(__file__).resolve().parents[1]
++CATALOG_V1 = ROOT / "data/catalog/catalog_v1.json"
++CATALOG_V2 = ROOT / "data/catalog/catalog_v2.json"
++PLACES = ROOT / "data/catalog/places_v1.json"
++POOL_V2 = ROOT / "data/demand/demand_pool_v2.jsonl"
++BRISOLIS, CALANQUA = "lys-alg-brs-20270215", "lys-alg-clq-20270215"
++ORVALIS_LATE, VELTRANE, MARSEILLE = (
++    "lys-alg-orv-20270215",
++    "lys-alg-vlt-20270215",
++    "mrs-alg-orv-20270215",
++)
++ROUND_TRIP = {
++    "origin": "Lyon",
++    "destination": "Alger",
++    "trip_type": "round_trip",
++    "travellers": 2,
++    "budget_per_person": "500",
++    "departure_after": "2027-02-15",
++    "departure_before": "2027-02-15",
++    "return_after": "2027-02-25",
++    "return_before": "2027-02-25",
++}
++ONE_WAY = {key: value for key, value in ROUND_TRIP.items() if not key.startswith("return")} | {
++    "trip_type": "one_way"
++}
++
++
++@pytest.fixture(scope="module")
++def catalog():
++    return load_offer_catalog(CATALOG_V2)[0]
++
++
++def unit(fields=None, unit_id="user", **changes):
++    draft = TravelRequestDraft.model_validate((fields or ROUND_TRIP) | changes)
++    return build_travel_unit(unit_id, draft, REFERENCE)
++
++
++def write_catalog(tmp_path, document, name="catalog_v2.json"):
++    """A catalogue file with a matching manifest, so that only the tested rule can fail."""
++    raw = (json.dumps(document, indent=2) + "\n").encode("utf-8")
++    path = tmp_path / name
++    path.write_bytes(raw)
++    manifest = json.loads((ROOT / "data/catalog/catalog_v2.manifest.json").read_text("utf-8"))
++    manifest |= {
++        "catalog_file": name,
++        "catalog_sha256": hashlib.sha256(raw).hexdigest(),
++        "offers": len(document["offers"]),
++    }
++    (tmp_path / name).with_suffix(".manifest.json").write_text(json.dumps(manifest), "utf-8")
++    return path
++
++
++def base_document():
++    return json.loads(CATALOG_V2.read_text("utf-8"))
++
++
++# --- the frozen v2 data --------------------------------------------------------------------
++
++
++def test_the_frozen_v2_data_load_and_agree(catalog):
++    assert catalog.version == "catalog-v2"
++    kinds = {
++        offer.offer_id: (offer.trip_type, offer.direct, offer.capacity_seats)
++        for offer in catalog.offers
++    }
++    assert kinds == {
++        BRISOLIS: ("round_trip", True, 40),
++        CALANQUA: ("round_trip", False, 28),  # C3 and C2 over both legs
++        ORVALIS_LATE: ("round_trip", True, 40),
++        VELTRANE: ("one_way", True, 30),
++        MARSEILLE: ("round_trip", True, 40),
++    }
++    directory = load_place_directory(PLACES)
++    check_catalog_places(catalog, directory)
++    assert directory.names == ("Alger", "Lyon", "Marseille")
++    pool = load_demand_pool(POOL_V2)
++    assert (pool.version, pool.catalog_version, len(pool.requests)) == (
++        "demand-pool-v2",
++        "catalog-v2",
++        6,
++    )
++    assert load_offer_catalog(CATALOG_V1)[0].sha256.startswith("4b145ecbdbd6")
++
++
++# --- C1 to C6 and H-forfait at loading -----------------------------------------------------
++
++
++def mutate(index, change):
++    document = base_document()
++    change(document["offers"][index])
++    return document
++
++
++def drop_return_key(offer):
++    del offer["return"]["leg_ref"]
++
++
++REFUSED_ROUND_TRIP = {
++    "partial return block": drop_return_key,
++    "null return block": lambda offer: offer.update({"return": None}),
++    "C1 return before outbound": lambda offer: offer["return"].update(
++        {
++            "departure_date": "2027-02-14",
++            "arrival_date": "2027-02-14",
++            "leg_ref": "BRS-312-20270214",
++        }
++    ),
++    "C2 declared capacity": lambda offer: offer.update({"capacity_seats": 39}),
++    "C4 tier above capacity": lambda offer: offer["tiers"].append(
++        {"min_seats": 41, "list_per_seat_cents": 20000, "seller_floor_per_seat_cents": 14000}
++    ),
++    "C5 lowercase": lambda offer: offer["return"].update({"leg_ref": "brs-312-20270225"}),
++    "C5 suffix": lambda offer: offer["return"].update({"leg_ref": "BRS-312-20270226"}),
++    "C5 space": lambda offer: offer["return"].update({"leg_ref": "BRS 312-20270225"}),
++    "C6 within the package": lambda offer: offer["return"].update(
++        {
++            "departure_date": "2027-02-15",
++            "arrival_date": "2027-02-15",
++            "leg_ref": "BRS-311-20270215",
++        }
++    ),
++    "redundant direct field": lambda offer: offer.update({"direct": True}),
++}
++REFUSED_ONE_WAY = {
++    "C1 leg dates": lambda offer: offer["outbound"].update({"arrival_date": "2027-02-14"}),
++    "C2 declared capacity": lambda offer: offer.update({"capacity_seats": 31}),
++    "C4 tier above capacity": lambda offer: offer["tiers"].append(
++        {"min_seats": 31, "list_per_seat_cents": 15000, "seller_floor_per_seat_cents": 10500}
++    ),
++    "C5 non canonical": lambda offer: offer["outbound"].update({"leg_ref": "VLT_77_20270215"}),
++    "C5 suffix": lambda offer: offer["outbound"].update({"leg_ref": "VLT-77-20270216"}),
++    "partial outbound block": lambda offer: offer["outbound"].pop("direct"),
++}
++
++
++@pytest.mark.parametrize("name", sorted(REFUSED_ROUND_TRIP))
++def test_a_round_trip_package_breaking_a_rule_is_refused(tmp_path, name):
++    path = write_catalog(tmp_path, mutate(0, REFUSED_ROUND_TRIP[name]))
++    with pytest.raises(CatalogValidationError):
++        load_offer_catalog(path)
++
++
++@pytest.mark.parametrize("name", sorted(REFUSED_ONE_WAY))
++def test_a_one_way_package_breaking_a_rule_is_refused(tmp_path, name):
++    path = write_catalog(tmp_path, mutate(3, REFUSED_ONE_WAY[name]))
++    with pytest.raises(CatalogValidationError):
++        load_offer_catalog(path)
++
++
++def test_c6_a_leg_shared_by_two_packages_is_refused(tmp_path):
++    document = base_document()
++    document["offers"][4]["outbound"]["leg_ref"] = "BRS-311-20270215"  # Brisolis outbound
++    with pytest.raises(CatalogValidationError, match="C6"):
++        load_offer_catalog(write_catalog(tmp_path, document))
++
++
++def test_the_format_key_selects_the_reader(tmp_path):
++    document = base_document()
++    document["format"] = "offer-catalog-v3"
++    with pytest.raises(CatalogValidationError, match="format"):
++        load_offer_catalog(write_catalog(tmp_path, document))
++    without = base_document()
++    del without["format"]
++    with pytest.raises(CatalogValidationError):  # read as v1, whose keys differ
++        load_offer_catalog(write_catalog(tmp_path, without))
++
++
++def test_a_valid_variant_with_a_stopover_on_the_outbound_loads(tmp_path):
++    document = mutate(0, lambda offer: offer["outbound"].update({"direct": False}))
++    offer = load_offer_catalog(write_catalog(tmp_path, document))[0].get(BRISOLIS)
++    assert offer.direct is False  # C3, computed by the reader
++
++
++# --- place directory ------------------------------------------------------------------------
++
++
++def write_places(tmp_path, document):
++    raw = (json.dumps(document) + "\n").encode("utf-8")
++    path = tmp_path / "places_v1.json"
++    path.write_bytes(raw)
++    manifest = json.loads((ROOT / "data/catalog/places_v1.manifest.json").read_text("utf-8"))
++    manifest |= {
++        "places_sha256": hashlib.sha256(raw).hexdigest(),
++        "places": len(document["places"]),
++    }
++    path.with_suffix(".manifest.json").write_text(json.dumps(manifest), "utf-8")
++    return path
++
++
++def test_the_place_directory_aliases():
++    directory = load_place_directory(PLACES)
++    for spelling, name in (
++        ("Algiers", "Alger"),
++        ("alg", "Alger"),
++        ("LYS", "Lyon"),
++        ("Marseilles", "Marseille"),
++    ):
++        assert directory.resolve(spelling) == name
++    assert directory.resolve("Paris") is None
++
++
++def test_an_invalid_place_directory_is_refused(tmp_path, catalog):
++    colliding = {
++        "version": "places-v1",
++        "places": [{"name": "Alger", "aliases": ["Lyon"]}, {"name": "Lyon", "aliases": []}],
++    }
++    with pytest.raises(CatalogValidationError, match="share a spelling"):
++        load_place_directory(write_places(tmp_path, colliding))
++    missing = {"version": "places-v1", "places": [{"name": "Alger", "aliases": []}]}
++    directory = load_place_directory(write_places(tmp_path, missing))
++    with pytest.raises(CatalogValidationError, match="canonical place name"):
++        check_catalog_places(catalog, directory)
++    path = write_places(tmp_path, missing)
++    path.write_text(path.read_text("utf-8") + " ", "utf-8")
++    with pytest.raises(CatalogValidationError, match="does not match"):
++        load_place_directory(path)
++
++
++def test_a_catalogue_naming_a_place_by_an_alias_is_refused(tmp_path):
++    document = mutate(0, lambda offer: offer.update({"destination": "Algiers"}))
++    catalog = load_offer_catalog(write_catalog(tmp_path, document))[0]
++    with pytest.raises(CatalogValidationError, match="canonical"):
++        check_catalog_places(catalog, load_place_directory(PLACES))
++
++
++# --- NON_FINANCIAL_V2: one test per rule and per reason -------------------------------------
++
++
++def reasons(pair):
++    return [(item.rule.value, item.reason, item.profile_id) for item in pair.violations]
++
++
++def evaluate(unit_, offer):
++    return evaluate_unit_offer(unit_, offer, REFERENCE, AdmissibilityPolicy.NON_FINANCIAL_V2)
++
++
++def test_the_v2_registry_keeps_v1_unchanged():
++    assert RULE_REGISTRY[AdmissibilityPolicy.NON_FINANCIAL_V1] is RULE_ORDER
++    assert RULE_REGISTRY[AdmissibilityPolicy.NON_FINANCIAL_V2] is RULE_ORDER_V2
++    assert [rule for rule in RULE_ORDER_V2 if rule in RULE_ORDER] == list(RULE_ORDER)
++
++
++def test_the_reference_unit_is_admissible_on_the_reference_package(catalog):
++    pair = evaluate(unit(), catalog.get(BRISOLIS))
++    assert pair.admissible and pair.notes == ()
++
++
++def test_route_mismatches_are_the_only_violations_reported(catalog):
++    assert reasons(evaluate(unit(origin="Marseille"), catalog.get(BRISOLIS))) == [
++        ("origin", "origin_mismatch", None)
++    ]
++    marseille = replace(catalog.get(MARSEILLE), destination="Oran")
++    assert reasons(evaluate(unit(), marseille)) == [
++        ("destination", "destination_mismatch", None),
++        ("origin", "origin_mismatch", None),
++    ]
++
++
++def test_trip_type_mismatch_both_ways(catalog):
++    assert reasons(evaluate(unit(), catalog.get(VELTRANE))) == [
++        ("trip_type", "trip_type_mismatch", None)
++    ]
++    assert reasons(evaluate(unit(ONE_WAY), catalog.get(BRISOLIS))) == [
++        ("trip_type", "trip_type_mismatch", None)
++    ]
++    assert evaluate(unit(ONE_WAY), catalog.get(VELTRANE)).admissible
++
++
++def test_departure_window_both_bounds(catalog):
++    early = unit(departure_after="2027-02-16", departure_before="2027-02-20")
++    late = unit(departure_after="2027-02-01", departure_before="2027-02-14")
++    assert reasons(evaluate(early, catalog.get(BRISOLIS))) == [
++        ("departure_window", "departure_before_window", "all")
++    ]
++    assert reasons(evaluate(late, catalog.get(BRISOLIS))) == [
++        ("departure_window", "departure_after_window", "all")
++    ]
++
++
++def test_return_window_both_bounds(catalog):
++    assert reasons(evaluate(unit(), catalog.get(ORVALIS_LATE))) == [
++        ("return_window", "return_after_window", "all")
++    ]
++    later = unit(return_after="2027-02-26", return_before="2027-02-28")
++    assert reasons(evaluate(later, catalog.get(BRISOLIS))) == [
++        ("return_window", "return_before_window", "all")
++    ]
++    assert evaluate(later, catalog.get(ORVALIS_LATE)).admissible
++
++
++def test_offer_before_reference_and_arrival_window(catalog):
++    after = evaluate_unit_offer(
++        unit(), catalog.get(BRISOLIS), date(2026, 11, 19), AdmissibilityPolicy.NON_FINANCIAL_V2
++    )
++    assert after.admissible
++    arrival = unit(arrival_before="2027-02-14", departure_after="2027-02-01")
++    assert ("arrival_window", "arrival_after_window", "all") in reasons(
++        evaluate(arrival, catalog.get(BRISOLIS))
++    )
++    later_reference = evaluate_unit_offer(
++        build_travel_unit("user", TravelRequestDraft.model_validate(ROUND_TRIP), REFERENCE),
++        catalog.get(BRISOLIS),
++        date(2027, 2, 16),
++        AdmissibilityPolicy.NON_FINANCIAL_V2,
++    )
++    assert ("offer_not_before_reference", "offer_departs_before_reference_date", None) in reasons(
++        later_reference
++    )
++
++
++def test_direct_flight_supplier_and_capacity(catalog):
++    required = unit(direct_flight="required")
++    assert reasons(evaluate(required, catalog.get(CALANQUA))) == [
++        ("direct_flight", "direct_flight_required", "all")
++    ]
++    preferred = evaluate(unit(direct_flight="preferred"), catalog.get(CALANQUA))
++    assert preferred.admissible and [note.code for note in preferred.notes] == [
++        "direct_preference_not_met"
++    ]
++    excluded = unit(excluded_suppliers=["calanqua"])
++    assert reasons(evaluate(excluded, catalog.get(CALANQUA))) == [
++        ("supplier_exclusion", "excluded_supplier", "all")
++    ]
++    with pytest.raises(ValueError, match="C2"):  # not the smallest leg capacity
++        replace(catalog.get(CALANQUA), capacity_seats=19)
++    assert evaluate(unit(travellers=20), catalog.get(CALANQUA)).admissible  # 20 <= 28
++
++
++def test_capacity_violation_on_a_package(catalog):
++    offer = catalog.get(CALANQUA)
++    legs = (
++        replace(offer.outbound, capacity_seats=10),
++        replace(offer.return_leg, capacity_seats=10),
++    )
++    tight = replace(offer, outbound=legs[0], return_leg=legs[1], capacity_seats=10)
++    assert reasons(evaluate(unit(travellers=12), tight)) == [
++        ("unit_capacity", "unit_exceeds_offer_capacity", None)
++    ]
++
++
++def test_profile_level_windows_are_reported_per_profile(catalog):
++    split = unit(
++        profiles=[
++            {"profile_id": "a", "traveller_count": 1},
++            {
++                "profile_id": "b",
++                "traveller_count": 1,
++                "return_after": "2027-02-20",
++                "return_before": "2027-02-24",
++            },
++        ]
++    )
++    pair = evaluate(split, catalog.get(BRISOLIS))
++    assert reasons(pair) == [("return_window", "return_after_window", "b")]
++
++
++# --- policy deduction and K9 ------------------------------------------------------------------
++
++
++def test_the_policy_is_deduced_from_the_lot(catalog):
++    lot = lot_admissibility((unit(),), catalog, REFERENCE)
++    assert lot.policy is AdmissibilityPolicy.NON_FINANCIAL_V2
++    v1_catalog = load_offer_catalog(CATALOG_V1)[0]
++    tokyo = build_travel_unit(
++        "user",
++        TravelRequestDraft(destination="Tokyo", travellers=1, budget_per_person="520"),
++        REFERENCE,
++    )
++    assert (
++        lot_admissibility((tokyo,), v1_catalog, REFERENCE).policy
++        is AdmissibilityPolicy.NON_FINANCIAL_V1
++    )
++
++
++def test_k9_mixed_lots_and_contradicting_policies_are_refused(catalog):
++    v1_catalog = load_offer_catalog(CATALOG_V1)[0]
++    tokyo = build_travel_unit(
++        "tokyo",
++        TravelRequestDraft(destination="Tokyo", travellers=1, budget_per_person="520"),
++        REFERENCE,
++    )
++    for units, offers in (((unit(), tokyo), catalog), ((unit(),), v1_catalog), ((tokyo,), catalog)):
++        with pytest.raises(LotInputError, match="K9"):
++            lot_admissibility(units, offers, REFERENCE)
++    with pytest.raises(LotInputError, match="contradicts"):
++        lot_admissibility((unit(),), catalog, REFERENCE, AdmissibilityPolicy.NON_FINANCIAL_V1)
++    with pytest.raises(ValueError, match="NON_FINANCIAL_V2"):
++        evaluate_unit_offer(unit(), catalog.get(BRISOLIS), REFERENCE)
++    with pytest.raises(ValueError, match="NON_FINANCIAL_V2"):
++        evaluate_unit_offer(
++            tokyo, v1_catalog.offers[1], REFERENCE, AdmissibilityPolicy.NON_FINANCIAL_V2
++        )
++
++
++def test_route_selection_keeps_one_route_per_lot():
++    pool = load_demand_pool(POOL_V2)
++    market = open_simulated_market(CATALOG_V2, REFERENCE)
++    request = PlanningRequest("user", TravelRequestDraft.model_validate(ROUND_TRIP))
++    plan = plan_lot(PlanningInput((request,), pool, REFERENCE), market)
++    assert plan.status == "planned"
++    assert plan.pool_unit_ids == (
++        "pool-lys-alg-01",
++        "pool-lys-alg-02",
++        "pool-lys-alg-03",
++        "pool-lys-alg-04",
++    )
++    keys = {route_key(item) for item in plan.units}
++    assert keys == {"lyon>alger|round_trip"}
++    assert plan.stages.lot.policy is AdmissibilityPolicy.NON_FINANCIAL_V2
++    tokyo = build_travel_unit(
++        "t",
++        TravelRequestDraft(destination="Tokyo", travellers=1, budget_per_person="520"),
++        REFERENCE,
++    )
++    assert route_key(tokyo) == "tokyo"
++
++
++# --- route validation (D-I4-3, D-I4-4) ------------------------------------------------------
++
++
++def test_v2_required_fields_in_order():
++    assert REQUIRED_FIELDS_V2[:5] == (
++        "origin",
++        "destination",
++        "travellers",
++        "budget_per_person",
++        "trip_type",
++    )
++    partial = validate_request_draft(TravelRequestDraft(origin="Lyon"), REFERENCE)
++    assert partial.missing_fields == (
++        "destination",
++        "travellers",
++        "budget_per_person",
++        "trip_type",
++        "departure_after",
++        "departure_before",
++    )
++    round_trip = {key: value for key, value in ROUND_TRIP.items() if not key.startswith("return")}
++    result = validate_request_draft(TravelRequestDraft.model_validate(round_trip), REFERENCE)
++    assert result.missing_fields == ("return_after", "return_before")
++    assert (
++        validate_request_draft(TravelRequestDraft.model_validate(ONE_WAY), REFERENCE).status
++        == "ready"
++    )
++    v1 = validate_request_draft(TravelRequestDraft(destination="Tokyo"), REFERENCE)
++    assert v1.missing_fields == ("travellers", "budget_per_person")
++
++
++@pytest.mark.parametrize(
++    ("changes", "message"),
++    [
++        (
++            {"departure_before": "2026-11-01", "departure_after": None},
++            "departure_before must not be before the reference date",
++        ),
++        ({"return_after": "2026-11-01"}, "return_after must not be before the reference date"),
++        ({"departure_after": "2027-02-16"}, "departure_after must not be after departure_before"),
++        ({"return_after": "2027-02-26"}, "return_after must not be after return_before"),
++        ({"trip_type": "one_way"}, "a one_way request must not have a return window"),
++        (
++            {"return_after": "2027-02-10", "return_before": "2027-02-12"},
++            "the return window must not end before the departure window starts",
++        ),
++    ],
++)
++def test_route_validation_messages(changes, message):
++    fields = ROUND_TRIP | changes
++    result = validate_request_draft(
++        TravelRequestDraft.model_validate(
++            {key: value for key, value in fields.items() if value is not None}
++        ),
++        REFERENCE,
++    )
++    assert result.status in ("invalid", "needs_clarification")
++    if result.status == "invalid":
++        assert message in result.errors
++    else:  # a removed bound is first a missing field
++        assert "departure_after" in result.missing_fields
++
++
++@pytest.mark.parametrize(
++    ("profile", "message"),
++    [
++        (
++            {"return_before": "2027-02-20", "return_after": "2027-02-21"},
++            "profile a: the return window is empty",
++        ),
++        ({"departure_before": "2027-02-14"}, "profile a: the departure window is empty"),
++        ({"return_before": "2026-11-01"}, "profile a: return_before is before reference date"),
++        (
++            {"return_before": "2027-02-10"},
++            "profile a: the return window ends before the departure window starts",
++        ),
++    ],
++)
++def test_profile_route_validation_messages(profile, message):
++    draft = TravelRequestDraft.model_validate(
++        ROUND_TRIP | {"profiles": [{"profile_id": "a", "traveller_count": 2} | profile]}
++    )
++    assert message in validate_request_draft(draft, REFERENCE).errors
++
++
++def test_a_one_way_profile_with_a_return_window_is_invalid():
++    draft = TravelRequestDraft.model_validate(
++        ONE_WAY
++        | {"profiles": [{"profile_id": "a", "traveller_count": 2, "return_before": "2027-02-25"}]}
++    )
++    assert (
++        "profile a: a one_way request must not have a return window"
++        in validate_request_draft(draft, REFERENCE).errors
++    )
++
++
++def test_the_frozen_pool_requests_are_valid_route_requests():
++    pool = load_demand_pool(POOL_V2)
++    directory = load_place_directory(PLACES)
++    for request in pool.requests:
++        assert validate_request_draft(request.draft, REFERENCE).status == "ready"
++        assert directory.resolve(request.draft.origin) == request.draft.origin
++        assert directory.resolve(request.draft.destination) == request.draft.destination
++
++
++def test_a_window_set_on_every_profile_satisfies_the_requirement():
++    base = {key: value for key, value in ROUND_TRIP.items() if not key.startswith("return")}
++    window = {"return_after": "2027-02-25", "return_before": "2027-02-25"}
++    everyone = TravelRequestDraft.model_validate(
++        base
++        | {
++            "profiles": [
++                {"profile_id": "a", "traveller_count": 1} | window,
++                {"profile_id": "b", "traveller_count": 1} | window,
++            ]
++        }
++    )
++    assert validate_request_draft(everyone, REFERENCE).status == "ready"
++    one = TravelRequestDraft.model_validate(
++        base
++        | {
++            "profiles": [
++                {"profile_id": "a", "traveller_count": 1} | window,
++                {"profile_id": "b", "traveller_count": 1},
++            ]
++        }
++    )
++    assert validate_request_draft(one, REFERENCE).missing_fields == (
++        "return_after",
++        "return_before",
++    )
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/tests/test_i4_contracts.py b/tests/test_i4_contracts.py
+--- a/tests/test_i4_contracts.py	2026-11-20 04:52:44
++++ b/tests/test_i4_contracts.py	2026-11-20 05:00:50
+@@ -86,7 +86,8 @@
+ def identities(draft, offer=None):
+     """The three identities of §6.4 plus the profile consolidation key (B5)."""
+     unit = unit_of(draft)
+-    offer = offer or (package() if unit.is_route_unit else None)
++    if offer is None and unit.is_route_unit:
++        offer = package(back=unit.trip_type == "round_trip")
+     key = None if offer is None else negotiation_request_for((unit,), offer).request_key
+     profiles = tuple(negotiation_profile_key(p) for p in build_profiles(draft))
+     return {
+@@ -263,8 +264,10 @@
+ 
+ 
+ def test_k4_an_omitted_field_and_an_explicit_null_give_the_same_key():
+-    omitted = {key: value for key, value in ROUTE.items() if key != "return_before"}
+-    explicit = ROUTE | {"return_before": None}
++    one_way = {key: value for key, value in ROUTE.items() if not key.startswith("return")}
++    one_way["trip_type"] = "one_way"
++    omitted = one_way
++    explicit = one_way | {"return_after": None, "return_before": None, "arrival_before": None}
+     left = identities(TravelRequestDraft.model_validate(omitted))
+     right = identities(TravelRequestDraft.model_validate(explicit))
+     assert left == right
+@@ -366,7 +369,7 @@
+         "origin": ["Lyon", "LYON", "Marseille"],
+         "trip_type": ["round_trip", "one_way"],
+         "departure_before": ["2027-02-15", "2027-02-16"],
+-        "return_before": ["2027-02-25", "2027-02-26", None],
++        "return_before": ["2027-02-25", "2027-02-26"],
+         "budget_per_person": ["500", "500.00", "510"],
+         "travellers": [1, 2],
+     }
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/data/catalog/catalog_v2.json b/data/catalog/catalog_v2.json
+--- a/data/catalog/catalog_v2.json	1970-01-01 01:00:00
++++ b/data/catalog/catalog_v2.json	2026-11-20 04:57:37
+@@ -0,0 +1,171 @@
++{
++  "format": "offer-catalog-v2",
++  "catalog_version": "catalog-v2",
++  "currency": "EUR",
++  "synthetic": true,
++  "offers": [
++    {
++      "offer_id": "lys-alg-brs-20270215",
++      "supplier_id": "Brisolis",
++      "origin": "Lyon",
++      "destination": "Alger",
++      "outbound": {
++        "departure_date": "2027-02-15",
++        "arrival_date": "2027-02-15",
++        "direct": true,
++        "capacity_seats": 40,
++        "leg_ref": "BRS-311-20270215"
++      },
++      "return": {
++        "departure_date": "2027-02-25",
++        "arrival_date": "2027-02-25",
++        "direct": true,
++        "capacity_seats": 40,
++        "leg_ref": "BRS-312-20270225"
++      },
++      "capacity_seats": 40,
++      "tiers": [
++        {
++          "min_seats": 1,
++          "list_per_seat_cents": 32000,
++          "seller_floor_per_seat_cents": 22400
++        },
++        {
++          "min_seats": 3,
++          "list_per_seat_cents": 29000,
++          "seller_floor_per_seat_cents": 20300
++        },
++        {
++          "min_seats": 6,
++          "list_per_seat_cents": 26500,
++          "seller_floor_per_seat_cents": 18550
++        }
++      ]
++    },
++    {
++      "offer_id": "lys-alg-clq-20270215",
++      "supplier_id": "Calanqua",
++      "origin": "Lyon",
++      "destination": "Alger",
++      "outbound": {
++        "departure_date": "2027-02-15",
++        "arrival_date": "2027-02-15",
++        "direct": true,
++        "capacity_seats": 30,
++        "leg_ref": "CLQ-120-20270215"
++      },
++      "return": {
++        "departure_date": "2027-02-25",
++        "arrival_date": "2027-02-25",
++        "direct": false,
++        "capacity_seats": 28,
++        "leg_ref": "CLQ-121-20270225"
++      },
++      "capacity_seats": 28,
++      "tiers": [
++        {
++          "min_seats": 1,
++          "list_per_seat_cents": 29000,
++          "seller_floor_per_seat_cents": 20300
++        },
++        {
++          "min_seats": 4,
++          "list_per_seat_cents": 27000,
++          "seller_floor_per_seat_cents": 18900
++        }
++      ]
++    },
++    {
++      "offer_id": "lys-alg-orv-20270215",
++      "supplier_id": "Orvalis",
++      "origin": "Lyon",
++      "destination": "Alger",
++      "outbound": {
++        "departure_date": "2027-02-15",
++        "arrival_date": "2027-02-15",
++        "direct": true,
++        "capacity_seats": 40,
++        "leg_ref": "ORV-501-20270215"
++      },
++      "return": {
++        "departure_date": "2027-02-27",
++        "arrival_date": "2027-02-27",
++        "direct": true,
++        "capacity_seats": 40,
++        "leg_ref": "ORV-502-20270227"
++      },
++      "capacity_seats": 40,
++      "tiers": [
++        {
++          "min_seats": 1,
++          "list_per_seat_cents": 30500,
++          "seller_floor_per_seat_cents": 21350
++        },
++        {
++          "min_seats": 4,
++          "list_per_seat_cents": 28000,
++          "seller_floor_per_seat_cents": 19600
++        }
++      ]
++    },
++    {
++      "offer_id": "lys-alg-vlt-20270215",
++      "supplier_id": "Veltrane",
++      "origin": "Lyon",
++      "destination": "Alger",
++      "outbound": {
++        "departure_date": "2027-02-15",
++        "arrival_date": "2027-02-15",
++        "direct": true,
++        "capacity_seats": 30,
++        "leg_ref": "VLT-77-20270215"
++      },
++      "capacity_seats": 30,
++      "tiers": [
++        {
++          "min_seats": 1,
++          "list_per_seat_cents": 17000,
++          "seller_floor_per_seat_cents": 11900
++        },
++        {
++          "min_seats": 4,
++          "list_per_seat_cents": 15500,
++          "seller_floor_per_seat_cents": 10850
++        }
++      ]
++    },
++    {
++      "offer_id": "mrs-alg-orv-20270215",
++      "supplier_id": "Orvalis",
++      "origin": "Marseille",
++      "destination": "Alger",
++      "outbound": {
++        "departure_date": "2027-02-15",
++        "arrival_date": "2027-02-15",
++        "direct": true,
++        "capacity_seats": 40,
++        "leg_ref": "ORV-601-20270215"
++      },
++      "return": {
++        "departure_date": "2027-02-25",
++        "arrival_date": "2027-02-25",
++        "direct": true,
++        "capacity_seats": 40,
++        "leg_ref": "ORV-602-20270225"
++      },
++      "capacity_seats": 40,
++      "tiers": [
++        {
++          "min_seats": 1,
++          "list_per_seat_cents": 30000,
++          "seller_floor_per_seat_cents": 21000
++        },
++        {
++          "min_seats": 4,
++          "list_per_seat_cents": 27500,
++          "seller_floor_per_seat_cents": 19250
++        }
++      ]
++    }
++  ]
++}
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/data/catalog/catalog_v2.manifest.json b/data/catalog/catalog_v2.manifest.json
+--- a/data/catalog/catalog_v2.manifest.json	1970-01-01 01:00:00
++++ b/data/catalog/catalog_v2.manifest.json	2026-11-20 04:57:37
+@@ -0,0 +1,15 @@
++{
++  "version": "catalog-v2",
++  "catalog_file": "catalog_v2.json",
++  "catalog_sha256": "cc5f07797ec2c929f388050fb1dff96a53ba58c9a6671ef73f8d872956697480",
++  "synthetic": true,
++  "currency": "EUR",
++  "offers": 5,
++  "purpose": "Fictional round-trip and one-way packages for the Lyon-Alger reference example of the 3H plan (I4, plan section 6.2): route admissibility, package legs and route-aware negotiation keys.",
++  "limitations": [
++    "Suppliers, flights, prices and capacities are fictional; nothing here is availability, a schedule or a commercial offer.",
++    "Written from rules fixed in advance (scope review I4, section 5): list prices per seat for the whole package, private floors at 70 percent of the list price, per-seat prices non-increasing with group size, capacities such that H2 holds with the largest admitted request (20 seats) plus the demand pool v2.",
++    "Frozen by this manifest before the first planning run (I4-B) and never tuned afterwards; any edit requires updating catalog_sha256 here, and the loader refuses a mismatch.",
++    "Seller floors are private parameters of the simulated seller; they are used only by the P3 negotiation simulator and are never shown to travellers."
++  ]
++}
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/data/catalog/places_v1.json b/data/catalog/places_v1.json
+--- a/data/catalog/places_v1.json	1970-01-01 01:00:00
++++ b/data/catalog/places_v1.json	2026-11-20 04:57:37
+@@ -0,0 +1,27 @@
++{
++  "version": "places-v1",
++  "places": [
++    {
++      "name": "Alger",
++      "aliases": [
++        "Algiers",
++        "ALG",
++        "Argel"
++      ]
++    },
++    {
++      "name": "Lyon",
++      "aliases": [
++        "LYS",
++        "Lyons"
++      ]
++    },
++    {
++      "name": "Marseille",
++      "aliases": [
++        "Marseilles",
++        "MRS"
++      ]
++    }
++  ]
++}
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/data/catalog/places_v1.manifest.json b/data/catalog/places_v1.manifest.json
+--- a/data/catalog/places_v1.manifest.json	1970-01-01 01:00:00
++++ b/data/catalog/places_v1.manifest.json	2026-11-20 04:57:37
+@@ -0,0 +1,12 @@
++{
++  "version": "places-v1",
++  "places_file": "places_v1.json",
++  "places_sha256": "c73912b440ebb7aba7c71e3ade9d18f57c755ec5c189cdc78f0a3b6960eb4828",
++  "places": 3,
++  "purpose": "Closed directory of the places of catalog-v2 with their aliases (ID-11, plan section 6.5): a spelling in another language resolves to the canonical name before a unit is built.",
++  "limitations": [
++    "Covers the places of catalog-v2 only; it is not a general place normalizer (P7).",
++    "The v1 path (catalog-v1, requests without a route) never uses it.",
++    "Any edit requires updating places_sha256 here, and the loader refuses a mismatch."
++  ]
++}
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/data/demand/demand_pool_v2.jsonl b/data/demand/demand_pool_v2.jsonl
+--- a/data/demand/demand_pool_v2.jsonl	1970-01-01 01:00:00
++++ b/data/demand/demand_pool_v2.jsonl	2026-11-20 04:57:37
+@@ -0,0 +1,6 @@
++{"request_id":"pool-lys-alg-01","synthetic":true,"draft":{"origin":"Lyon","destination":"Alger","trip_type":"round_trip","travellers":1,"budget_per_person":"340.00","departure_after":"2027-02-15","departure_before":"2027-02-15","return_after":"2027-02-25","return_before":"2027-02-25"}}
++{"request_id":"pool-lys-alg-02","synthetic":true,"draft":{"origin":"Lyon","destination":"Alger","trip_type":"round_trip","travellers":2,"budget_per_person":"300.00","departure_after":"2027-02-15","departure_before":"2027-02-15","return_after":"2027-02-25","return_before":"2027-02-25"}}
++{"request_id":"pool-lys-alg-03","synthetic":true,"draft":{"origin":"Lyon","destination":"Alger","trip_type":"round_trip","travellers":1,"budget_per_person":"310.00","departure_after":"2027-02-15","departure_before":"2027-02-15","return_after":"2027-02-25","return_before":"2027-02-25"}}
++{"request_id":"pool-lys-alg-04","synthetic":true,"draft":{"origin":"Lyon","destination":"Alger","trip_type":"round_trip","travellers":3,"budget_per_person":"280.00","departure_after":"2027-02-15","departure_before":"2027-02-15","return_after":"2027-02-25","return_before":"2027-02-25"}}
++{"request_id":"pool-lys-alg-ow-01","synthetic":true,"draft":{"origin":"Lyon","destination":"Alger","trip_type":"one_way","travellers":2,"budget_per_person":"180.00","departure_after":"2027-02-15","departure_before":"2027-02-15"}}
++{"request_id":"pool-mrs-alg-01","synthetic":true,"draft":{"origin":"Marseille","destination":"Alger","trip_type":"round_trip","travellers":2,"budget_per_person":"320.00","departure_after":"2027-02-15","departure_before":"2027-02-15","return_after":"2027-02-25","return_before":"2027-02-25"}}
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/data/demand/demand_pool_v2.manifest.json b/data/demand/demand_pool_v2.manifest.json
+--- a/data/demand/demand_pool_v2.manifest.json	1970-01-01 01:00:00
++++ b/data/demand/demand_pool_v2.manifest.json	2026-11-20 04:57:37
+@@ -0,0 +1,14 @@
++{
++  "version": "demand-pool-v2",
++  "pool_file": "demand_pool_v2.jsonl",
++  "pool_sha256": "ea17f72788632595bfa1fdf5a5c85f9a07cc45d8e2fd6d63c00c34141ebb3656",
++  "synthetic": true,
++  "catalog_version": "catalog-v2",
++  "requests": 6,
++  "purpose": "Fictional pending route requests that a traveller's v2 request joins in the 3H demonstration mode (plan 3H/P5, ID-1, I4): four Lyon-Alger round trips on the reference windows, one Lyon-Alger one way and one Marseille-Alger round trip on other routes.",
++  "limitations": [
++    "Requests are fictional; they describe no real traveller.",
++    "Budgets lie on both sides of the catalog-v2 list prices, so a coalition is possible but not guaranteed; the expected outcome was not fixed in advance.",
++    "Frozen by this manifest before the first planning run (I4-B) and never tuned afterwards; any edit requires updating pool_sha256 here, and the loader refuses a mismatch."
++  ]
++}

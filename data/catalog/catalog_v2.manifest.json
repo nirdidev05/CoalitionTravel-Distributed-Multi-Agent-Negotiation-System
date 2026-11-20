@@ -1,0 +1,15 @@
+{
+  "version": "catalog-v2",
+  "catalog_file": "catalog_v2.json",
+  "catalog_sha256": "cc5f07797ec2c929f388050fb1dff96a53ba58c9a6671ef73f8d872956697480",
+  "synthetic": true,
+  "currency": "EUR",
+  "offers": 5,
+  "purpose": "Fictional round-trip and one-way packages for the Lyon-Alger reference example of the 3H plan (I4, plan section 6.2): route admissibility, package legs and route-aware negotiation keys.",
+  "limitations": [
+    "Suppliers, flights, prices and capacities are fictional; nothing here is availability, a schedule or a commercial offer.",
+    "Written from rules fixed in advance (scope review I4, section 5): list prices per seat for the whole package, private floors at 70 percent of the list price, per-seat prices non-increasing with group size, capacities such that H2 holds with the largest admitted request (20 seats) plus the demand pool v2.",
+    "Frozen by this manifest before the first planning run (I4-B) and never tuned afterwards; any edit requires updating catalog_sha256 here, and the loader refuses a mismatch.",
+    "Seller floors are private parameters of the simulated seller; they are used only by the P3 negotiation simulator and are never shown to travellers."
+  ]
+}

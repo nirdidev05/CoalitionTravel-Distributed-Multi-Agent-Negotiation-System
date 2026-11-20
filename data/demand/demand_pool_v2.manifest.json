@@ -1,0 +1,14 @@
+{
+  "version": "demand-pool-v2",
+  "pool_file": "demand_pool_v2.jsonl",
+  "pool_sha256": "ea17f72788632595bfa1fdf5a5c85f9a07cc45d8e2fd6d63c00c34141ebb3656",
+  "synthetic": true,
+  "catalog_version": "catalog-v2",
+  "requests": 6,
+  "purpose": "Fictional pending route requests that a traveller's v2 request joins in the 3H demonstration mode (plan 3H/P5, ID-1, I4): four Lyon-Alger round trips on the reference windows, one Lyon-Alger one way and one Marseille-Alger round trip on other routes.",
+  "limitations": [
+    "Requests are fictional; they describe no real traveller.",
+    "Budgets lie on both sides of the catalog-v2 list prices, so a coalition is possible but not guaranteed; the expected outcome was not fixed in advance.",
+    "Frozen by this manifest before the first planning run (I4-B) and never tuned afterwards; any edit requires updating pool_sha256 here, and the loader refuses a mismatch."
+  ]
+}

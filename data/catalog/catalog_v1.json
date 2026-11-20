@@ -1,0 +1,47 @@
+{
+  "catalog_version": "catalog-v1",
+  "currency": "EUR",
+  "synthetic": true,
+  "offers": [
+    {
+      "offer_id": "rom-cloudwing-20270405",
+      "supplier_id": "CloudWing",
+      "destination": "Rome",
+      "departure_date": "2027-04-05",
+      "arrival_date": "2027-04-05",
+      "direct": true,
+      "capacity_seats": 40,
+      "tiers": [
+        {"min_seats": 1, "list_per_seat_cents": 30000, "seller_floor_per_seat_cents": 20000},
+        {"min_seats": 3, "list_per_seat_cents": 27000, "seller_floor_per_seat_cents": 18000}
+      ]
+    },
+    {
+      "offer_id": "tyo-northstar-20270310",
+      "supplier_id": "Northstar",
+      "destination": "Tokyo",
+      "departure_date": "2027-03-10",
+      "arrival_date": "2027-03-11",
+      "direct": true,
+      "capacity_seats": 60,
+      "tiers": [
+        {"min_seats": 1, "list_per_seat_cents": 56000, "seller_floor_per_seat_cents": 40000},
+        {"min_seats": 3, "list_per_seat_cents": 52000, "seller_floor_per_seat_cents": 37000},
+        {"min_seats": 6, "list_per_seat_cents": 48000, "seller_floor_per_seat_cents": 34000}
+      ]
+    },
+    {
+      "offer_id": "tyo-skyways-20270312",
+      "supplier_id": "SkyWays",
+      "destination": "Tokyo",
+      "departure_date": "2027-03-12",
+      "arrival_date": "2027-03-13",
+      "direct": false,
+      "capacity_seats": 60,
+      "tiers": [
+        {"min_seats": 1, "list_per_seat_cents": 54000, "seller_floor_per_seat_cents": 39000},
+        {"min_seats": 4, "list_per_seat_cents": 50000, "seller_floor_per_seat_cents": 36000}
+      ]
+    }
+  ]
+}

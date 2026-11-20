@@ -1,0 +1,12 @@
+{
+  "version": "rag-corpus-v1",
+  "synthetic": true,
+  "domains": ["business_knowledge", "supplier_knowledge", "negotiation_knowledge"],
+  "documents": 12,
+  "chunking_reference": {"chunk_size": 1200, "overlap": 0, "expected_chunks_per_document": 1},
+  "limitations": [
+    "All passages are fictional fixtures written for evaluation tooling.",
+    "No supplier availability, real policies, prices, or legal terms are represented.",
+    "Passages fit in one chunk under the declared chunking reference; retrieval metrics collapse any alternate chunks back to their source passage."
+  ]
+}

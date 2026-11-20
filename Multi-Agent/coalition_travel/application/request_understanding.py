@@ -6,7 +6,7 @@ from datetime import date, datetime
 from time import perf_counter
 from typing import Literal, Protocol
 
-from coalition_travel.application.request_contracts import TravelRequestDraft
+from coalition_travel.application.request_contracts import TravelRequestDraft, is_route_request
 
 
 class RequestExtractionError(RuntimeError):
@@ -52,6 +52,20 @@ class RequestUnderstandingResult:
 
 
 REQUIRED_FIELDS = ("destination", "travellers", "budget_per_person")
+# v2 (route) requests, scope review I4, D-I4-3: closed windows; the return window is
+# required for a round trip only. The order is the order of the clarification questions.
+REQUIRED_FIELDS_V2 = (
+    "origin",
+    "destination",
+    "travellers",
+    "budget_per_person",
+    "trip_type",
+    "departure_after",
+    "departure_before",
+    "return_after",
+    "return_before",
+)
+_RETURN_FIELDS = ("return_after", "return_before")
 
 
 def validate_request_draft(
@@ -61,7 +75,10 @@ def validate_request_draft(
     """Apply deterministic business checks after schema validation."""
     if not isinstance(reference_date, date) or isinstance(reference_date, datetime):
         raise TypeError("reference_date must be a date")
-    missing = tuple(field for field in REQUIRED_FIELDS if getattr(request, field) is None)
+    if is_route_request(request):  # v2 (I4, D-I4-1); the v1 rule below is unchanged
+        missing = _route_missing_fields(request)
+    else:
+        missing = tuple(field for field in REQUIRED_FIELDS if getattr(request, field) is None)
     if missing:
         return RequestUnderstandingResult(
             status="needs_clarification", request=request, missing_fields=missing
@@ -83,9 +100,106 @@ def validate_request_draft(
             errors.append(f"profile {profile.profile_id}: departure_after is before reference date")
         if profile.arrival_before and profile.arrival_before < reference_date:
             errors.append(f"profile {profile.profile_id}: arrival_before is before reference date")
+    if is_route_request(request):
+        errors.extend(_route_errors(request, reference_date))
     if errors:
         return RequestUnderstandingResult(status="invalid", request=request, errors=tuple(errors))
     return RequestUnderstandingResult(status="ready", request=request)
+
+
+def _route_missing_fields(request: TravelRequestDraft) -> tuple[str, ...]:
+    """A window bound is present when the request sets it, or when every profile does:
+    the effective window of each traveller is then closed (D-I4-3)."""
+    required = [name for name in REQUIRED_FIELDS_V2 if name not in _RETURN_FIELDS]
+    if request.trip_type == "round_trip":
+        required.extend(_RETURN_FIELDS)
+
+    def present(name: str) -> bool:
+        if getattr(request, name) is not None:
+            return True
+        return (
+            name in _WINDOW_FIELDS
+            and bool(request.profiles)
+            and all(getattr(profile, name) is not None for profile in request.profiles)
+        )
+
+    return tuple(name for name in REQUIRED_FIELDS_V2 if name in required and not present(name))
+
+
+_WINDOW_FIELDS = ("departure_after", "departure_before", "return_after", "return_before")
+
+
+def _route_errors(request: TravelRequestDraft, reference_date: date) -> list[str]:
+    """Deterministic v2 checks with fixed messages (domain E of trip-request-status-v2)."""
+    errors = []
+    for name in ("departure_before", "return_after", "return_before"):
+        value = getattr(request, name)
+        if value is not None and value < reference_date:
+            errors.append(f"{name} must not be before the reference date")
+    request_windows = (
+        request.departure_after,
+        request.departure_before,
+        request.return_after,
+        request.return_before,
+    )
+    errors.extend(_window_errors(request.trip_type, *request_windows, prefix=""))
+    for profile in request.profiles:
+        overrides = (profile.departure_after, *(getattr(profile, n) for n in _PROFILE_WINDOWS))
+        if all(value is None for value in overrides):
+            continue
+        for name in _PROFILE_WINDOWS:
+            value = getattr(profile, name)
+            if value is not None and value < reference_date:
+                errors.append(f"profile {profile.profile_id}: {name} is before reference date")
+        effective = tuple(
+            override if override is not None else inherited
+            for override, inherited in zip(overrides, request_windows)
+        )
+        own = profile.return_after is not None or profile.return_before is not None
+        errors.extend(
+            _window_errors(
+                request.trip_type,
+                *effective,
+                prefix=f"profile {profile.profile_id}: ",
+                own_return=own,
+            )
+        )
+    return errors
+
+
+_PROFILE_WINDOWS = ("departure_before", "return_after", "return_before")
+
+
+def _window_errors(
+    trip_type,
+    departure_after,
+    departure_before,
+    return_after,
+    return_before,
+    *,
+    prefix,
+    own_return=True,
+) -> list[str]:
+    errors = []
+    if prefix == "":
+        if departure_after and departure_before and departure_after > departure_before:
+            errors.append("departure_after must not be after departure_before")
+        if return_after and return_before and return_after > return_before:
+            errors.append("return_after must not be after return_before")
+        if trip_type == "one_way" and (return_after or return_before):
+            errors.append("a one_way request must not have a return window")
+        if return_before and departure_after and return_before < departure_after:
+            errors.append("the return window must not end before the departure window starts")
+        return errors
+    if departure_after and departure_before and departure_after > departure_before:
+        errors.append(f"{prefix}the departure window is empty")
+    if return_after and return_before and return_after > return_before:
+        errors.append(f"{prefix}the return window is empty")
+    if trip_type == "one_way" and own_return:
+        errors.append(f"{prefix}a one_way request must not have a return window")
+    if return_before and departure_after and return_before < departure_after:
+        errors.append(f"{prefix}the return window ends before the departure window starts")
+    return errors
 
 
 async def understand_request(

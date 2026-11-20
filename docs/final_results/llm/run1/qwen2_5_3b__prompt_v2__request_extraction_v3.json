@@ -1,0 +1,422 @@
+{
+  "samples": 8,
+  "request_exact_match": 0.0,
+  "field_exact_match": {
+    "destination": 0.0,
+    "travellers": 0.125,
+    "budget_per_person": 0.0,
+    "currency": 0.5,
+    "departure_after": 0.25,
+    "arrival_before": 0.5,
+    "direct_flight": 0.375,
+    "excluded_suppliers": 0.5,
+    "profiles": 0.0,
+    "origin": 0.375,
+    "trip_type": 0.375,
+    "departure_before": 0.125,
+    "return_after": 0.375,
+    "return_before": 0.375
+  },
+  "profile_count_exact_match": 0.0,
+  "profile_traveller_counts_exact_match": 0.0,
+  "profile_constraints_exact_match": 0.0,
+  "profile_exact_match": 0.0,
+  "provider": "ollama",
+  "model": "qwen2.5:3b",
+  "successful_calls": 4,
+  "failed_calls": 4,
+  "mean_latency_ms": 7466.169395750057,
+  "p50_latency_ms": 7760.610646000714,
+  "p95_latency_ms": 8649.20125000208,
+  "errors": [
+    {
+      "id": "en-lyon-algiers-alias",
+      "error": "StructuredOutputError"
+    },
+    {
+      "id": "fr-lyon-oran-lieu-inconnu",
+      "error": "StructuredOutputError"
+    },
+    {
+      "id": "fr-lyon-alger-aller-simple",
+      "error": "StructuredOutputError"
+    },
+    {
+      "id": "fr-lyon-alger-mois",
+      "error": "StructuredOutputError"
+    }
+  ],
+  "status_exact_match": 0.125,
+  "status_confusion_matrix": {
+    "invalid": {
+      "invalid": 0,
+      "needs_clarification": 0,
+      "ready": 0,
+      "extraction_error": 0
+    },
+    "needs_clarification": {
+      "invalid": 0,
+      "needs_clarification": 1,
+      "ready": 0,
+      "extraction_error": 0
+    },
+    "ready": {
+      "invalid": 0,
+      "needs_clarification": 3,
+      "ready": 0,
+      "extraction_error": 4
+    },
+    "extraction_error": {
+      "invalid": 0,
+      "needs_clarification": 0,
+      "ready": 0,
+      "extraction_error": 0
+    }
+  },
+  "clarification_metrics": {
+    "precision": 0.25,
+    "recall": 1.0
+  },
+  "invalid_request_metrics": {
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "examples": [
+    {
+      "id": "fr-lyon-alger-reference",
+      "expected_status": "ready",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "Alger",
+        "travellers": 2,
+        "budget_per_person": "500",
+        "currency": "EUR",
+        "departure_after": "2027-02-15",
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [],
+        "origin": "Lyon",
+        "trip_type": "round_trip",
+        "departure_before": "2027-02-15",
+        "return_after": "2027-02-25",
+        "return_before": "2027-02-25"
+      },
+      "actual": {
+        "destination": null,
+        "travellers": null,
+        "budget_per_person": null,
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "P001",
+            "traveller_count": 2,
+            "budget_per_person": "500",
+            "departure_after": "2027-02-15",
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null,
+            "departure_before": "2027-02-15",
+            "return_after": "2027-02-25",
+            "return_before": "2027-02-25"
+          }
+        ],
+        "origin": "Lyon",
+        "trip_type": "round_trip",
+        "departure_before": null,
+        "return_after": "2027-02-25",
+        "return_before": "2027-02-25"
+      },
+      "latency_ms": 8649.20125000208
+    },
+    {
+      "id": "fr-lyon-alger-sans-nombre",
+      "expected_status": "needs_clarification",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "Alger",
+        "travellers": null,
+        "budget_per_person": "500",
+        "currency": "EUR",
+        "departure_after": "2027-02-15",
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [],
+        "origin": "Lyon",
+        "trip_type": "round_trip",
+        "departure_before": "2027-02-15",
+        "return_after": "2027-02-25",
+        "return_before": "2027-02-25"
+      },
+      "actual": {
+        "destination": null,
+        "travellers": null,
+        "budget_per_person": null,
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "P001",
+            "traveller_count": 1,
+            "budget_per_person": "500",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null,
+            "departure_before": "2027-02-25",
+            "return_after": "2027-02-15",
+            "return_before": null
+          }
+        ],
+        "origin": "Lyon",
+        "trip_type": "round_trip",
+        "departure_before": "2027-02-25",
+        "return_after": "2027-02-15",
+        "return_before": null
+      },
+      "latency_ms": 6924.104207999335
+    },
+    {
+      "id": "en-lyon-algiers-alias",
+      "expected_status": "ready",
+      "actual_status": "extraction_error",
+      "expected": {
+        "destination": "Algiers",
+        "travellers": 2,
+        "budget_per_person": "500",
+        "currency": "EUR",
+        "departure_after": "2027-02-15",
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [],
+        "origin": "Lyon",
+        "trip_type": "round_trip",
+        "departure_before": "2027-02-15",
+        "return_after": "2027-02-25",
+        "return_before": "2027-02-25"
+      },
+      "actual": null,
+      "latency_ms": 8322.276457998669
+    },
+    {
+      "id": "fr-lyon-oran-lieu-inconnu",
+      "expected_status": "ready",
+      "actual_status": "extraction_error",
+      "expected": {
+        "destination": "Oran",
+        "travellers": 2,
+        "budget_per_person": "500",
+        "currency": "EUR",
+        "departure_after": "2027-02-15",
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [],
+        "origin": "Lyon",
+        "trip_type": "round_trip",
+        "departure_before": "2027-02-15",
+        "return_after": "2027-02-25",
+        "return_before": "2027-02-25"
+      },
+      "actual": null,
+      "latency_ms": 8275.285292002081
+    },
+    {
+      "id": "fr-lyon-alger-aller-simple",
+      "expected_status": "ready",
+      "actual_status": "extraction_error",
+      "expected": {
+        "destination": "Alger",
+        "travellers": 3,
+        "budget_per_person": "200",
+        "currency": "EUR",
+        "departure_after": "2027-02-15",
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [],
+        "origin": "Lyon",
+        "trip_type": "one_way",
+        "departure_before": "2027-02-15",
+        "return_after": null,
+        "return_before": null
+      },
+      "actual": null,
+      "latency_ms": 7245.935999999347
+    },
+    {
+      "id": "fr-lyon-alger-mois",
+      "expected_status": "ready",
+      "actual_status": "extraction_error",
+      "expected": {
+        "destination": "Alger",
+        "travellers": 2,
+        "budget_per_person": "450",
+        "currency": "EUR",
+        "departure_after": "2027-02-01",
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [],
+        "origin": "Lyon",
+        "trip_type": "round_trip",
+        "departure_before": "2027-02-28",
+        "return_after": "2027-03-01",
+        "return_before": "2027-03-31"
+      },
+      "actual": null,
+      "latency_ms": 8619.333833001292
+    },
+    {
+      "id": "fr-tokyo-v1",
+      "expected_status": "ready",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "Tokyo",
+        "travellers": 2,
+        "budget_per_person": "500.00",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [],
+        "origin": null,
+        "trip_type": null,
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      },
+      "actual": {
+        "destination": null,
+        "travellers": null,
+        "budget_per_person": null,
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "P001",
+            "traveller_count": 2,
+            "budget_per_person": "500",
+            "departure_after": "2026-11-19",
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null,
+            "departure_before": "2026-11-19",
+            "return_after": null,
+            "return_before": null
+          }
+        ],
+        "origin": "Tokyo",
+        "trip_type": "one_way",
+        "departure_before": "2026-11-19",
+        "return_after": null,
+        "return_before": null
+      },
+      "latency_ms": 7211.624999999913
+    },
+    {
+      "id": "en-rome-v1",
+      "expected_status": "ready",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "Rome",
+        "travellers": 3,
+        "budget_per_person": "420",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "preferred",
+        "excluded_suppliers": [],
+        "profiles": [],
+        "origin": null,
+        "trip_type": null,
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      },
+      "actual": {
+        "destination": null,
+        "travellers": null,
+        "budget_per_person": null,
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "traveller1",
+            "traveller_count": 3,
+            "budget_per_person": "420",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": "preferred",
+            "excluded_suppliers": null,
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          }
+        ],
+        "origin": null,
+        "trip_type": null,
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      },
+      "latency_ms": 4481.593124997744
+    }
+  ],
+  "run": {
+    "run_id": "c1fbff31-dde6-475c-b22c-6e19154f7962",
+    "recorded_at_utc": "2026-11-20T13:27:27.905674+00:00",
+    "task": "request_extraction",
+    "code": {
+      "commit": "5d547ec18a10965f52f1572296cfdd7dd95fa79f",
+      "working_tree_dirty": true
+    },
+    "dataset": {
+      "path": "data/eval/request_extraction_v3.jsonl",
+      "version": "request-extraction-v3",
+      "sha256": "34b297aa252441c1f5f9b204bad09133676ddc4c060ac0be8e22f5032809bc72",
+      "manifest": {
+        "version": "request-extraction-v3",
+        "synthetic": true,
+        "records": 8,
+        "format": "JSONL: id, case_type, reference_date, text, expected TravelRequestDraft (with the route fields of I4), expected_status; optional annotation",
+        "status_policy": "expected_status is the reviewed label ready, needs_clarification or invalid of the deterministic validation; place resolution (places-v1) is applied afterwards by the application and is not part of this label",
+        "limitations": [
+          "Synthetic cases are not representative of real traveller traffic.",
+          "Written for prompt travel-request-extraction-v2; it is only validated in I4 (--validate-only) and measured against Ollama in I5.",
+          "Exact match is intentionally strict; a valid Pydantic response may still be semantically wrong."
+        ],
+        "manifest_path": "data/eval/request_extraction_v3.manifest.json"
+      }
+    },
+    "configuration": {
+      "provider": "ollama",
+      "model": "qwen2.5:3b",
+      "model_digest": "357c53fb659c5076de1d65ccb0b397446227b71a42be9d1603d46168015c9e4b",
+      "prompt_version": "travel-request-extraction-v2",
+      "inference_parameters": {
+        "temperature": 0.0,
+        "stream": false,
+        "seed": 0
+      },
+      "timeout_seconds": 180.0
+    },
+    "status": "completed"
+  }
+}

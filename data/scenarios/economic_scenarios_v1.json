@@ -1,0 +1,1129 @@
+{
+  "schema": "economic-scenarios-v1",
+  "synthetic": true,
+  "catalog_versions": [
+    "catalog-v1",
+    "catalog-v2"
+  ],
+  "purpose": "Fixed economic reference scenarios (final mission, step 3). Requests are fictional and public; the private seller terms stay in the frozen catalogues. Written before their first run; the intent is a label, the command output is the result.",
+  "scenarios": [
+    {
+      "scenario_id": "s01-coalition-e3",
+      "intent": "served_in_coalition",
+      "description": "E3 of I3: 8 travellers to Tokyo at 500 EUR join the v1 pool.",
+      "reference_date": "2026-11-19",
+      "user": {
+        "destination": "Tokyo",
+        "travellers": 8,
+        "budget_per_person": "500"
+      },
+      "pool": [
+        {
+          "request_id": "pool-tyo-01",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "520.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-02",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "540.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-03",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 2,
+            "budget_per_person": "500.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-04",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-01",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 2,
+            "budget_per_person": "450.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-02",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 1,
+            "budget_per_person": "330.00"
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "s02-alone-empty-pool",
+      "intent": "alone_no_beneficial_coalition",
+      "description": "Same request with nobody else pending: the unit is alone in its component.",
+      "reference_date": "2026-11-19",
+      "user": {
+        "destination": "Tokyo",
+        "travellers": 8,
+        "budget_per_person": "500"
+      },
+      "pool": []
+    },
+    {
+      "scenario_id": "s03-no-admissible-offer",
+      "intent": "no_admissible_offer",
+      "description": "A destination absent from the catalogue.",
+      "reference_date": "2026-11-19",
+      "user": {
+        "destination": "Oslo",
+        "travellers": 2,
+        "budget_per_person": "500"
+      },
+      "pool": [
+        {
+          "request_id": "pool-tyo-01",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "520.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-02",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "540.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-03",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 2,
+            "budget_per_person": "500.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-04",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-01",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 2,
+            "budget_per_person": "450.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-02",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 1,
+            "budget_per_person": "330.00"
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "s04-budget-blocking",
+      "intent": "no_solo_reference",
+      "description": "A budget below every seller floor: no individual agreement exists.",
+      "reference_date": "2026-11-19",
+      "user": {
+        "destination": "Tokyo",
+        "travellers": 1,
+        "budget_per_person": "100"
+      },
+      "pool": [
+        {
+          "request_id": "pool-tyo-01",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "520.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-02",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "540.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-03",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 2,
+            "budget_per_person": "500.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-04",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-01",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 2,
+            "budget_per_person": "450.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-02",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 1,
+            "budget_per_person": "330.00"
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "s05-capacity-blocking",
+      "intent": "capacity_model_violated",
+      "description": "Pending demand on Tokyo exceeds the 60 seats of each offer (H2).",
+      "reference_date": "2026-11-19",
+      "user": {
+        "destination": "Tokyo",
+        "travellers": 20,
+        "budget_per_person": "600"
+      },
+      "pool": [
+        {
+          "request_id": "pool-s-1",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 20,
+            "budget_per_person": "600"
+          }
+        },
+        {
+          "request_id": "pool-s-2",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 20,
+            "budget_per_person": "600"
+          }
+        },
+        {
+          "request_id": "pool-s-3",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 20,
+            "budget_per_person": "600"
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "s06-social-optimum-tokyo",
+      "intent": "alone_social_optimum",
+      "description": "2 travellers at 500 EUR: a feasible coalition exists but the optimal partition leaves the unit alone.",
+      "reference_date": "2026-11-19",
+      "user": {
+        "destination": "Tokyo",
+        "travellers": 2,
+        "budget_per_person": "500"
+      },
+      "pool": [
+        {
+          "request_id": "pool-tyo-01",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "520.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-02",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "540.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-03",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 2,
+            "budget_per_person": "500.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-04",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-01",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 2,
+            "budget_per_person": "450.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-02",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 1,
+            "budget_per_person": "330.00"
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "s07-social-optimum-rome",
+      "intent": "alone_social_optimum",
+      "description": "Rome pattern of I3: 3 travellers at 450 EUR with the Rome pool requests.",
+      "reference_date": "2026-11-19",
+      "user": {
+        "destination": "Rome",
+        "travellers": 3,
+        "budget_per_person": "450"
+      },
+      "pool": [
+        {
+          "request_id": "pool-tyo-01",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "520.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-02",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "540.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-03",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 2,
+            "budget_per_person": "500.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-04",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-01",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 2,
+            "budget_per_person": "450.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-02",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 1,
+            "budget_per_person": "330.00"
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "s08-component-too-large",
+      "intent": "component_too_large",
+      "description": "Fifteen single-traveller requests to Tokyo exceed the component limit of P4.",
+      "reference_date": "2026-11-19",
+      "user": {
+        "destination": "Tokyo",
+        "travellers": 1,
+        "budget_per_person": "600"
+      },
+      "pool": [
+        {
+          "request_id": "pool-s-1",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600"
+          }
+        },
+        {
+          "request_id": "pool-s-2",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600"
+          }
+        },
+        {
+          "request_id": "pool-s-3",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600"
+          }
+        },
+        {
+          "request_id": "pool-s-4",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600"
+          }
+        },
+        {
+          "request_id": "pool-s-5",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600"
+          }
+        },
+        {
+          "request_id": "pool-s-6",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600"
+          }
+        },
+        {
+          "request_id": "pool-s-7",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600"
+          }
+        },
+        {
+          "request_id": "pool-s-8",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600"
+          }
+        },
+        {
+          "request_id": "pool-s-9",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600"
+          }
+        },
+        {
+          "request_id": "pool-s-10",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600"
+          }
+        },
+        {
+          "request_id": "pool-s-11",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600"
+          }
+        },
+        {
+          "request_id": "pool-s-12",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600"
+          }
+        },
+        {
+          "request_id": "pool-s-13",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600"
+          }
+        },
+        {
+          "request_id": "pool-s-14",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600"
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "s09-arrival-order-reversed",
+      "intent": "served_in_coalition",
+      "description": "s01 with the pool in reverse order: the result must not depend on arrival order.",
+      "reference_date": "2026-11-19",
+      "user": {
+        "destination": "Tokyo",
+        "travellers": 8,
+        "budget_per_person": "500"
+      },
+      "pool": [
+        {
+          "request_id": "pool-rom-02",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 1,
+            "budget_per_person": "330.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-01",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 2,
+            "budget_per_person": "450.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-04",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-03",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 2,
+            "budget_per_person": "500.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-02",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "540.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-01",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "520.00"
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "s10-group-size-1",
+      "intent": "group_size",
+      "description": "One traveller to Tokyo at 600 EUR with the v1 pool.",
+      "reference_date": "2026-11-19",
+      "user": {
+        "destination": "Tokyo",
+        "travellers": 1,
+        "budget_per_person": "600"
+      },
+      "pool": [
+        {
+          "request_id": "pool-tyo-01",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "520.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-02",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "540.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-03",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 2,
+            "budget_per_person": "500.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-04",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-01",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 2,
+            "budget_per_person": "450.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-02",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 1,
+            "budget_per_person": "330.00"
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "s11-group-size-4",
+      "intent": "group_size",
+      "description": "Four travellers to Tokyo at 600 EUR with the v1 pool.",
+      "reference_date": "2026-11-19",
+      "user": {
+        "destination": "Tokyo",
+        "travellers": 4,
+        "budget_per_person": "600"
+      },
+      "pool": [
+        {
+          "request_id": "pool-tyo-01",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "520.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-02",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "540.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-03",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 2,
+            "budget_per_person": "500.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-04",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-01",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 2,
+            "budget_per_person": "450.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-02",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 1,
+            "budget_per_person": "330.00"
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "s12-group-size-12",
+      "intent": "group_size",
+      "description": "Twelve travellers to Tokyo at 600 EUR with the v1 pool.",
+      "reference_date": "2026-11-19",
+      "user": {
+        "destination": "Tokyo",
+        "travellers": 12,
+        "budget_per_person": "600"
+      },
+      "pool": [
+        {
+          "request_id": "pool-tyo-01",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "520.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-02",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "540.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-03",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 2,
+            "budget_per_person": "500.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-04",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-01",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 2,
+            "budget_per_person": "450.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-02",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 1,
+            "budget_per_person": "330.00"
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "s13-budget-cap",
+      "intent": "budget_cap_active",
+      "description": "Profiles at 300 and 700 EUR (case of I3): the low-budget profile is saturated.",
+      "reference_date": "2026-11-19",
+      "user": {
+        "destination": "Tokyo",
+        "travellers": 4,
+        "budget_per_person": "600",
+        "profiles": [
+          {
+            "profile_id": "p1",
+            "traveller_count": 1,
+            "budget_per_person": "300"
+          },
+          {
+            "profile_id": "p2",
+            "traveller_count": 3,
+            "budget_per_person": "700"
+          }
+        ]
+      },
+      "pool": [
+        {
+          "request_id": "pool-tyo-01",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "520.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-02",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "540.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-03",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 2,
+            "budget_per_person": "500.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-04",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-01",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 2,
+            "budget_per_person": "450.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-02",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 1,
+            "budget_per_person": "330.00"
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "s14-identical-requests",
+      "intent": "ties",
+      "description": "Three identical pending requests and an identical traveller request: equal costs, deterministic tie-break.",
+      "reference_date": "2026-11-19",
+      "user": {
+        "destination": "Rome",
+        "travellers": 2,
+        "budget_per_person": "400"
+      },
+      "pool": [
+        {
+          "request_id": "pool-s-1",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 2,
+            "budget_per_person": "400"
+          }
+        },
+        {
+          "request_id": "pool-s-2",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 2,
+            "budget_per_person": "400"
+          }
+        },
+        {
+          "request_id": "pool-s-3",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 2,
+            "budget_per_person": "400"
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "s15-competing-coalitions",
+      "intent": "competing_coalitions",
+      "description": "Tokyo requests that two offers (Northstar, SkyWays) can both host.",
+      "reference_date": "2026-11-19",
+      "user": {
+        "destination": "Tokyo",
+        "travellers": 3,
+        "budget_per_person": "560"
+      },
+      "pool": [
+        {
+          "request_id": "pool-tyo-01",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "520.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-02",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "540.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-03",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 2,
+            "budget_per_person": "500.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-04",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600.00"
+          }
+        },
+        {
+          "request_id": "pool-s-1",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 3,
+            "budget_per_person": "560"
+          }
+        },
+        {
+          "request_id": "pool-s-2",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 4,
+            "budget_per_person": "520"
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "s16-very-high-budget",
+      "intent": "served_or_alone",
+      "description": "A very high budget (2000 EUR) never raises the price paid above the reference.",
+      "reference_date": "2026-11-19",
+      "user": {
+        "destination": "Tokyo",
+        "travellers": 2,
+        "budget_per_person": "2000"
+      },
+      "pool": [
+        {
+          "request_id": "pool-tyo-01",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "520.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-02",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "540.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-03",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 2,
+            "budget_per_person": "500.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-04",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-01",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 2,
+            "budget_per_person": "450.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-02",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 1,
+            "budget_per_person": "330.00"
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "s17-direct-required",
+      "intent": "direct_constraint",
+      "description": "A required direct flight to Tokyo excludes SkyWays.",
+      "reference_date": "2026-11-19",
+      "user": {
+        "destination": "Tokyo",
+        "travellers": 2,
+        "budget_per_person": "600",
+        "direct_flight": "required"
+      },
+      "pool": [
+        {
+          "request_id": "pool-tyo-01",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "520.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-02",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "540.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-03",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 2,
+            "budget_per_person": "500.00"
+          }
+        },
+        {
+          "request_id": "pool-tyo-04",
+          "draft": {
+            "destination": "Tokyo",
+            "travellers": 1,
+            "budget_per_person": "600.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-01",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 2,
+            "budget_per_person": "450.00"
+          }
+        },
+        {
+          "request_id": "pool-rom-02",
+          "draft": {
+            "destination": "Rome",
+            "travellers": 1,
+            "budget_per_person": "330.00"
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "s18-route-lyon-alger",
+      "intent": "served_in_coalition",
+      "description": "Route request of I4 (Lyon to Alger round trip, alias Algiers) with the v2 pool.",
+      "reference_date": "2027-01-15",
+      "user": {
+        "origin": "Lyon",
+        "destination": "Algiers",
+        "trip_type": "round_trip",
+        "travellers": 2,
+        "budget_per_person": "500",
+        "departure_after": "2027-02-15",
+        "departure_before": "2027-02-15",
+        "return_after": "2027-02-25",
+        "return_before": "2027-02-25"
+      },
+      "pool": [
+        {
+          "request_id": "pool-lys-alg-01",
+          "draft": {
+            "origin": "Lyon",
+            "destination": "Alger",
+            "trip_type": "round_trip",
+            "travellers": 1,
+            "budget_per_person": "340.00",
+            "departure_after": "2027-02-15",
+            "departure_before": "2027-02-15",
+            "return_after": "2027-02-25",
+            "return_before": "2027-02-25"
+          }
+        },
+        {
+          "request_id": "pool-lys-alg-02",
+          "draft": {
+            "origin": "Lyon",
+            "destination": "Alger",
+            "trip_type": "round_trip",
+            "travellers": 2,
+            "budget_per_person": "300.00",
+            "departure_after": "2027-02-15",
+            "departure_before": "2027-02-15",
+            "return_after": "2027-02-25",
+            "return_before": "2027-02-25"
+          }
+        },
+        {
+          "request_id": "pool-lys-alg-03",
+          "draft": {
+            "origin": "Lyon",
+            "destination": "Alger",
+            "trip_type": "round_trip",
+            "travellers": 1,
+            "budget_per_person": "310.00",
+            "departure_after": "2027-02-15",
+            "departure_before": "2027-02-15",
+            "return_after": "2027-02-25",
+            "return_before": "2027-02-25"
+          }
+        },
+        {
+          "request_id": "pool-lys-alg-04",
+          "draft": {
+            "origin": "Lyon",
+            "destination": "Alger",
+            "trip_type": "round_trip",
+            "travellers": 3,
+            "budget_per_person": "280.00",
+            "departure_after": "2027-02-15",
+            "departure_before": "2027-02-15",
+            "return_after": "2027-02-25",
+            "return_before": "2027-02-25"
+          }
+        },
+        {
+          "request_id": "pool-lys-alg-ow-01",
+          "draft": {
+            "origin": "Lyon",
+            "destination": "Alger",
+            "trip_type": "one_way",
+            "travellers": 2,
+            "budget_per_person": "180.00",
+            "departure_after": "2027-02-15",
+            "departure_before": "2027-02-15"
+          }
+        },
+        {
+          "request_id": "pool-mrs-alg-01",
+          "draft": {
+            "origin": "Marseille",
+            "destination": "Alger",
+            "trip_type": "round_trip",
+            "travellers": 2,
+            "budget_per_person": "320.00",
+            "departure_after": "2027-02-15",
+            "departure_before": "2027-02-15",
+            "return_after": "2027-02-25",
+            "return_before": "2027-02-25"
+          }
+        }
+      ]
+    }
+  ]
+}

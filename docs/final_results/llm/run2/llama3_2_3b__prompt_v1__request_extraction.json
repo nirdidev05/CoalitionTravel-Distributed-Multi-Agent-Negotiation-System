@@ -1,0 +1,366 @@
+{
+  "samples": 8,
+  "request_exact_match": 0.0,
+  "field_exact_match": {
+    "destination": 0.875,
+    "travellers": 0.375,
+    "budget_per_person": 0.875,
+    "currency": 0.875,
+    "departure_after": 0.625,
+    "arrival_before": 0.75,
+    "direct_flight": 0.25,
+    "excluded_suppliers": 0.875,
+    "profiles": 0.375
+  },
+  "profile_count_exact_match": 0.375,
+  "profile_traveller_counts_exact_match": 0.375,
+  "profile_constraints_exact_match": 0.375,
+  "profile_exact_match": 0.375,
+  "provider": "ollama",
+  "model": "llama3.2:3b",
+  "successful_calls": 7,
+  "failed_calls": 1,
+  "mean_latency_ms": 9441.33981250161,
+  "p50_latency_ms": 9226.18893750041,
+  "p95_latency_ms": 18973.080958006904,
+  "errors": [
+    {
+      "id": "en-preference",
+      "error": "StructuredOutputError"
+    }
+  ],
+  "status_exact_match": 0.375,
+  "status_confusion_matrix": {
+    "invalid": {
+      "invalid": 0,
+      "needs_clarification": 0,
+      "ready": 0,
+      "extraction_error": 0
+    },
+    "needs_clarification": {
+      "invalid": 0,
+      "needs_clarification": 2,
+      "ready": 0,
+      "extraction_error": 0
+    },
+    "ready": {
+      "invalid": 0,
+      "needs_clarification": 4,
+      "ready": 1,
+      "extraction_error": 1
+    },
+    "extraction_error": {
+      "invalid": 0,
+      "needs_clarification": 0,
+      "ready": 0,
+      "extraction_error": 0
+    }
+  },
+  "clarification_metrics": {
+    "precision": 0.3333333333333333,
+    "recall": 1.0
+  },
+  "invalid_request_metrics": {
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "examples": [
+    {
+      "id": "fr-basic",
+      "expected_status": "ready",
+      "actual_status": "ready",
+      "expected": {
+        "destination": "Tokyo",
+        "travellers": 2,
+        "budget_per_person": "500.00",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": []
+      },
+      "actual": {
+        "destination": "Tokyo",
+        "travellers": 2,
+        "budget_per_person": "500",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "preferred",
+        "excluded_suppliers": [],
+        "profiles": []
+      },
+      "latency_ms": 7316.199708002387
+    },
+    {
+      "id": "en-preference",
+      "expected_status": "ready",
+      "actual_status": "extraction_error",
+      "expected": {
+        "destination": "Rome",
+        "travellers": 3,
+        "budget_per_person": "420",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "preferred",
+        "excluded_suppliers": [],
+        "profiles": []
+      },
+      "actual": null,
+      "latency_ms": 18973.080958006904
+    },
+    {
+      "id": "fr-hard-direct",
+      "expected_status": "ready",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "Montréal",
+        "travellers": 1,
+        "budget_per_person": "900",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "required",
+        "excluded_suppliers": [],
+        "profiles": []
+      },
+      "actual": {
+        "destination": "Montréal",
+        "travellers": null,
+        "budget_per_person": "900",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "required",
+        "excluded_suppliers": [],
+        "profiles": []
+      },
+      "latency_ms": 4928.698290998
+    },
+    {
+      "id": "fr-exclusion",
+      "expected_status": "ready",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "Lisbonne",
+        "travellers": 2,
+        "budget_per_person": "350",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [
+          "Air France"
+        ],
+        "profiles": []
+      },
+      "actual": {
+        "destination": "Lisbonne",
+        "travellers": null,
+        "budget_per_person": "350",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "preferred",
+        "excluded_suppliers": [
+          "Air France"
+        ],
+        "profiles": [
+          {
+            "profile_id": "single",
+            "traveller_count": 2,
+            "budget_per_person": "350",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": "preferred",
+            "excluded_suppliers": [
+              "Air France"
+            ]
+          }
+        ]
+      },
+      "latency_ms": 9569.609917001799
+    },
+    {
+      "id": "relative-date",
+      "expected_status": "ready",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "Tokyo",
+        "travellers": 1,
+        "budget_per_person": "600",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": "2027-02-20",
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": []
+      },
+      "actual": {
+        "destination": "Tokyo",
+        "travellers": null,
+        "budget_per_person": "600",
+        "currency": "EUR",
+        "departure_after": "2027-02-20",
+        "arrival_before": "2027-02-20",
+        "direct_flight": "preferred",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "single",
+            "traveller_count": 1,
+            "budget_per_person": "600",
+            "departure_after": "2027-02-20",
+            "arrival_before": "2027-02-20",
+            "direct_flight": "preferred",
+            "excluded_suppliers": []
+          }
+        ]
+      },
+      "latency_ms": 10436.818959002267
+    },
+    {
+      "id": "missing-budget",
+      "expected_status": "needs_clarification",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "Madrid",
+        "travellers": 4,
+        "budget_per_person": null,
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": []
+      },
+      "actual": {
+        "destination": "Madrid",
+        "travellers": 4,
+        "budget_per_person": null,
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "preferred",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "group1",
+            "traveller_count": 4,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": "preferred",
+            "excluded_suppliers": []
+          }
+        ]
+      },
+      "latency_ms": 8882.767957999022
+    },
+    {
+      "id": "missing-travellers",
+      "expected_status": "needs_clarification",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "Berlin",
+        "travellers": null,
+        "budget_per_person": "250",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": []
+      },
+      "actual": {
+        "destination": "Berlin",
+        "travellers": null,
+        "budget_per_person": "250",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "preferred",
+        "excluded_suppliers": [],
+        "profiles": []
+      },
+      "latency_ms": 4737.486917001661
+    },
+    {
+      "id": "mixed-preferences",
+      "expected_status": "ready",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "Osaka",
+        "travellers": 2,
+        "budget_per_person": "700",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": "2027-04-10",
+        "direct_flight": "preferred",
+        "excluded_suppliers": [
+          "EasyJet"
+        ],
+        "profiles": []
+      },
+      "actual": {
+        "destination": "Osaka",
+        "travellers": null,
+        "budget_per_person": "700",
+        "currency": "EUR",
+        "departure_after": "2027-04-10",
+        "arrival_before": null,
+        "direct_flight": "preferred",
+        "excluded_suppliers": [
+          "EasyJet"
+        ],
+        "profiles": [
+          {
+            "profile_id": "single",
+            "traveller_count": 1,
+            "budget_per_person": "700",
+            "departure_after": "2027-04-10",
+            "arrival_before": null,
+            "direct_flight": "required",
+            "excluded_suppliers": [
+              "EasyJet"
+            ]
+          }
+        ]
+      },
+      "latency_ms": 10686.055792000843
+    }
+  ],
+  "run": {
+    "run_id": "d5d15b58-c460-4f84-bf69-d4ec9fff7303",
+    "recorded_at_utc": "2026-11-20T14:36:16.501003+00:00",
+    "task": "request_extraction",
+    "code": {
+      "commit": null,
+      "working_tree_dirty": null
+    },
+    "dataset": {
+      "path": "data/eval/request_extraction.jsonl",
+      "version": "unversioned",
+      "sha256": "06ac2bb9395bf4162a268484efc8428dafdef3699572083b392e2562b58a6d10",
+      "manifest": {
+        "version": "unversioned",
+        "manifest_path": null
+      }
+    },
+    "configuration": {
+      "provider": "ollama",
+      "model": "llama3.2:3b",
+      "model_digest": "a80c4f17acd55265feec403c7aef86be0c25983ab279d83f3bcd3abbcb5b8b72",
+      "prompt_version": "travel-request-extraction-v1",
+      "inference_parameters": {
+        "temperature": 0.0,
+        "stream": false,
+        "seed": 0
+      },
+      "timeout_seconds": 180.0
+    },
+    "status": "completed"
+  }
+}

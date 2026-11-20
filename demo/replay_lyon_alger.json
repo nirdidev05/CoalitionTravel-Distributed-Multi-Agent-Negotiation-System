@@ -1,0 +1,31 @@
+[
+  {
+    "destination": "Algiers",
+    "travellers": null,
+    "budget_per_person": "500",
+    "currency": "EUR",
+    "departure_after": "2027-02-15",
+    "arrival_before": "2027-02-25",
+    "direct_flight": "preferred",
+    "excluded_suppliers": [],
+    "profiles": [
+      {
+        "profile_id": "traveller1",
+        "traveller_count": 2,
+        "budget_per_person": "500",
+        "departure_after": "2027-02-15",
+        "arrival_before": "2027-02-25",
+        "direct_flight": "preferred",
+        "excluded_suppliers": [],
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      }
+    ],
+    "origin": "Lyon",
+    "trip_type": "round_trip",
+    "departure_before": "2027-02-15",
+    "return_after": "2027-02-25",
+    "return_before": null
+  }
+]

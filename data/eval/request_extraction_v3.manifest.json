@@ -1,0 +1,12 @@
+{
+  "version": "request-extraction-v3",
+  "synthetic": true,
+  "records": 8,
+  "format": "JSONL: id, case_type, reference_date, text, expected TravelRequestDraft (with the route fields of I4), expected_status; optional annotation",
+  "status_policy": "expected_status is the reviewed label ready, needs_clarification or invalid of the deterministic validation; place resolution (places-v1) is applied afterwards by the application and is not part of this label",
+  "limitations": [
+    "Synthetic cases are not representative of real traveller traffic.",
+    "Written for prompt travel-request-extraction-v2; it is only validated in I4 (--validate-only) and measured against Ollama in I5.",
+    "Exact match is intentionally strict; a valid Pydantic response may still be semantically wrong."
+  ]
+}

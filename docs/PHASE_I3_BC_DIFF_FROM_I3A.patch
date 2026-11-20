@@ -1,0 +1,2786 @@
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/application/travel_workflow.py b/Multi-Agent/coalition_travel/application/travel_workflow.py
+--- a/Multi-Agent/coalition_travel/application/travel_workflow.py	2026-11-20 04:18:21
++++ b/Multi-Agent/coalition_travel/application/travel_workflow.py	2026-11-20 04:08:12
+@@ -6,13 +6,28 @@
+ 
+ from Message import Message
+ 
++from coalition_travel.application.coalition_candidates import DEFAULT_LIMITS, FormationLimits
+ from coalition_travel.application.compatibility import evaluate_compatibility
+ from coalition_travel.application.profiles import build_profiles, create_buyer_agents
++from coalition_travel.application.request_contracts import TravelRequestDraft
+ from coalition_travel.application.request_understanding import (
+     RequestUnderstandingResult,
+     StructuredRequestExtractor,
+     understand_request,
+ )
++from coalition_travel.application.trip_planning import (
++    DemandPoolSnapshot,
++    NegotiationMarket,
++    PlanningInput,
++    PlanningRequest,
++    TripPlan,
++    plan_lot,
++)
++from coalition_travel.application.trip_proposal import (
++    ExtractionProvenance,
++    TripProposal,
++    build_trip_proposal,
++)
+ from coalition_travel.domain.traveler_profile import CommonOffer, CompatibilityResult
+ 
+ 
+@@ -76,3 +91,42 @@
+             )
+         )
+     return TravelWorkflowResult(understanding, buyers, compatibility)
++
++
++# --- 3H path: a validated request to a public proposal (step I3-C) ------------------------
++
++
++@dataclass(frozen=True)
++class TravelPlanningResult:
++    plan: TripPlan  # internal: digests and journals stay here
++    proposal: TripProposal | None  # None exactly when plan.status == "request_rejected"
++
++    def __post_init__(self):
++        if (self.proposal is None) != (self.plan.status == "request_rejected"):
++            raise ValueError("a proposal exists exactly for a planned request")
++
++
++def plan_travel_request(
++    request: TravelRequestDraft,
++    *,
++    market: NegotiationMarket,
++    pool: DemandPoolSnapshot,
++    reference_date: date,
++    extraction: ExtractionProvenance,
++    request_id: str = "user",
++    limits: FormationLimits = DEFAULT_LIMITS,
++) -> TravelPlanningResult:
++    """Plan one request already validated by the person, then build its proposal.
++
++    Understanding, clarification and the validation question stay with the caller (ID-10),
++    so nothing is negotiated before the person validates the request. No status is added:
++    the statuses are those of ``TripPlan`` (scope review §6.1).
++    """
++    planning = PlanningInput((PlanningRequest(request_id, request),), pool, reference_date, limits)
++    plan = plan_lot(planning, market)
++    if plan.status == "request_rejected":
++        return TravelPlanningResult(plan, None)
++    proposal = build_trip_proposal(
++        plan, request_id=request_id, draft=request, extraction=extraction
++    )
++    return TravelPlanningResult(plan, proposal)
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/application/trip_proposal.py b/Multi-Agent/coalition_travel/application/trip_proposal.py
+--- a/Multi-Agent/coalition_travel/application/trip_proposal.py	2026-11-20 04:18:21
++++ b/Multi-Agent/coalition_travel/application/trip_proposal.py	2026-11-20 04:02:18
+@@ -498,6 +498,11 @@
+         modifiers = tuple(item.code for item in self.explanations if item.level == "modifier")
+         if modifiers != self.status.modifiers:
+             raise ProposalConsistencyError("modifier explanations differ from the status")
++        if len(set(modifiers)) != len(modifiers) or not set(modifiers) <= set(MODIFIER_CODES):
++            raise ProposalConsistencyError("modifiers must be distinct codes of the closed set")
++        annotations = [(item.code, item.offer_id) for item in self.explanations]
++        if len(set(annotations)) != len(annotations):
++            raise ProposalConsistencyError("an explanation code appears twice for the same offer")
+         if list(self.explanations) != sorted(self.explanations, key=Explanation.sort_key):
+             raise ProposalConsistencyError("explanations must be in canonical order")
+         if [o.offer_id for o in self.offers] != sorted(o.offer_id for o in self.offers):
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/infrastructure/llm/replay.py b/Multi-Agent/coalition_travel/infrastructure/llm/replay.py
+--- a/Multi-Agent/coalition_travel/infrastructure/llm/replay.py	1970-01-01 01:00:00
++++ b/Multi-Agent/coalition_travel/infrastructure/llm/replay.py	2026-11-20 04:07:59
+@@ -0,0 +1,56 @@
++"""Replay extractor: recorded drafts instead of a language model (D-I3-10, step I3-C).
++
++A tool for tests and offline demonstrations, never used by default. The file holds a
++JSON list of ``TravelRequestDraft`` objects; the n-th extraction returns the n-th draft,
++validated by ``model_validate``. Beyond the list, the extractor raises
++``ExtractorContractError`` (exit code 1).
++
++The provenance is ``provider = "replay"`` and ``model = "replay-v1"``: a constant that
++never depends on the file content (revision 3). The file is read once, at construction,
++so an unreadable file is reported while the options are read (exit code 64). No message
++quotes the path or the content of the file.
++"""
++
++import json
++from datetime import date
++from pathlib import Path
++
++from pydantic import ValidationError
++
++from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.request_understanding import ExtractorContractError
++from coalition_travel.application.trip_proposal import REPLAY_FORMAT_VERSION, REPLAY_PROVIDER
++
++
++class ReplayStructuredRequestExtractor:
++    provider_name = REPLAY_PROVIDER
++    model = REPLAY_FORMAT_VERSION
++
++    def __init__(self, path: str | Path):
++        raw = Path(path).read_bytes()  # OSError propagates: the caller reports it (code 64)
++        try:
++            entries = json.loads(raw.decode("utf-8"))
++        except (UnicodeDecodeError, json.JSONDecodeError):
++            raise ExtractorContractError("the replay file is not a JSON document") from None
++        if not isinstance(entries, list):
++            raise ExtractorContractError("the replay file must hold a JSON list of drafts")
++        self._entries = tuple(entries)
++        self.calls = 0
++
++    @property
++    def size(self) -> int:
++        return len(self._entries)
++
++    async def extract(self, text: str, reference_date: date) -> TravelRequestDraft:
++        if self.calls >= len(self._entries):
++            raise ExtractorContractError(
++                f"the replay file is exhausted after {len(self._entries)} draft(s)"
++            )
++        index = self.calls
++        self.calls += 1
++        try:
++            return TravelRequestDraft.model_validate(self._entries[index])
++        except ValidationError:
++            raise ExtractorContractError(
++                f"replay entry {index} is not a valid TravelRequestDraft"
++            ) from None
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/infrastructure/presentation/__init__.py b/Multi-Agent/coalition_travel/infrastructure/presentation/__init__.py
+--- a/Multi-Agent/coalition_travel/infrastructure/presentation/__init__.py	1970-01-01 01:00:00
++++ b/Multi-Agent/coalition_travel/infrastructure/presentation/__init__.py	2026-11-20 04:05:26
+@@ -0,0 +1 @@
++"""Presentation of a simulated proposal: French messages, text and JSON (step I3-B)."""
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/infrastructure/presentation/explanations_fr.py b/Multi-Agent/coalition_travel/infrastructure/presentation/explanations_fr.py
+--- a/Multi-Agent/coalition_travel/infrastructure/presentation/explanations_fr.py	1970-01-01 01:00:00
++++ b/Multi-Agent/coalition_travel/infrastructure/presentation/explanations_fr.py	2026-11-20 04:05:33
+@@ -0,0 +1,269 @@
++"""Deterministic French messages for the 13 explanation codes (scope review §5, I3-B).
++
++A message depends only on the code and its typed parameters: no clock, no locale, no
++randomness. Amounts are formatted from integer cents ("3 801,00 €"); a rational amount
++that is not a whole number of cents is shown rounded, with its exact value.
++
++Vocabulary (plan §1.2): "proposition", "prix négocié (simulation)", "répartition
++calculée", "demande validée". The words "meilleur", "optimal" and "avantageux" are never
++applied to the situation of the person (scope review §5.4); no forbidden word is used.
++"""
++
++from fractions import Fraction
++
++from coalition_travel.application.trip_proposal import (
++    AloneNoBeneficialCoalitionParams,
++    AloneSocialOptimumParams,
++    BudgetCapActiveParams,
++    CapacityModelViolatedParams,
++    ComponentTooLargeParams,
++    DirectPreferenceNotMetParams,
++    Explanation,
++    NoAdmissibleOfferParams,
++    NoSoloReferenceParams,
++    OfferRejectedParams,
++    ProjectionActiveParams,
++    ServedInCoalitionParams,
++    ViolationView,
++)
++
++# --- amounts ------------------------------------------------------------------------------
++
++
++def euros(cents: int) -> str:
++    """Integer cents as French euros: 380100 -> "3 801,00 €"."""
++    if isinstance(cents, bool) or not isinstance(cents, int):
++        raise TypeError("amounts are integer cents")
++    sign = "-" if cents < 0 else ""
++    whole, fraction = divmod(abs(cents), 100)
++    grouped = f"{whole:,}".replace(",", " ")
++    return f"{sign}{grouped},{fraction:02d} €"
++
++
++def euros_exact(value: Fraction) -> str:
++    """A rational amount in cents; a non-integer value keeps its exact form."""
++    value = Fraction(value)
++    if value.denominator == 1:
++        return euros(value.numerator)
++    return (
++        f"≈ {euros(round(value))} (valeur exacte : {value.numerator}/{value.denominator} centimes)"
++    )
++
++
++def _plural(count: int, singular: str, plural: str) -> str:
++    return f"{count} {singular if count == 1 else plural}"
++
++
++# --- request level ------------------------------------------------------------------------
++
++FIELD_LABELS = {
++    "destination": "la destination",
++    "travellers": "le nombre de voyageurs",
++    "budget_per_person": "le budget par personne",
++}
++CLARIFICATION_QUESTIONS = {
++    "destination": "Quelle est la destination du voyage ?",
++    "travellers": "Combien de personnes voyagent ?",
++    "budget_per_person": "Quel est le budget par personne, en euros ?",
++}
++
++
++def needs_clarification_message(missing_fields) -> str:
++    labels = [FIELD_LABELS[field] for field in missing_fields]
++    return "Il manque des informations pour traiter la demande : " + ", ".join(labels) + "."
++
++
++def unknown_place_message() -> str:
++    return "Le lieu demandé n'est pas reconnu par le référentiel des lieux."
++
++
++REQUEST_REJECTION_MESSAGES = {
++    "budget_below_one_cent": "Le budget par personne est inférieur à un centime.",
++    "budget_out_of_range": (
++        "Le budget par personne dépasse le montant maximal pris en charge (1 000 000 000 €)."
++    ),
++    "budget_total_out_of_range": (
++        "Le budget total de la demande dépasse le montant maximal pris en charge (1 000 000 000 €)."
++    ),
++}
++
++
++def forbidden_term_message(path: str) -> str:
++    """D-I3-17: names the field, never quotes the value."""
++    return (
++        f"Le champ {path} contient un terme qui ne peut pas figurer dans une proposition simulée."
++    )
++
++
++# --- offers -------------------------------------------------------------------------------
++
++REASON_LABELS = {
++    "destination_mismatch": "la destination de l'offre ne correspond pas à la demande",
++    "offer_departs_before_reference_date": "l'offre part avant la date de référence",
++    "departure_before_window": "le départ a lieu avant la date de départ demandée",
++    "arrival_after_window": "l'arrivée a lieu après la date d'arrivée demandée",
++    "direct_flight_required": "un vol direct est exigé et l'offre comporte une escale",
++    "excluded_supplier": "le fournisseur de l'offre est exclu",
++    "unit_exceeds_offer_capacity": "la demande compte plus de voyageurs que la capacité de l'offre",
++}
++
++
++def violation_text(violation: ViolationView) -> str:
++    text = REASON_LABELS[violation.reason]
++    if violation.profile_id is not None:
++        text += f" (profil {violation.profile_id})"
++    return text
++
++
++# --- the eleven proposal codes ------------------------------------------------------------
++
++
++def _served(params: ServedInCoalitionParams) -> str:
++    others = _plural(params.other_requests, "autre demande", "autres demandes")
++    return (
++        f"Votre demande voyage avec {others} sur l'offre {params.offer_id}. "
++        f"Économie calculée pour votre demande : {euros(params.saving_cents)}."
++    )
++
++
++def _alone_no_beneficial(params: AloneNoBeneficialCoalitionParams) -> str:
++    alone = "Votre demande voyage seule, au prix négocié (simulation) de sa référence."
++    if params.evaluated == 0:
++        return (
++            "Aucune autre demande ne partageait d'offre admissible avec la vôtre : aucune "
++            f"coalition n'a été évaluée. {alone}"
++        )
++    evaluated = _plural(params.evaluated, "coalition évaluée", "coalitions évaluées")
++    return (
++        f"Parmi les {evaluated} par P4 qui incluaient votre demande (toutes celles qui "
++        "partageaient une offre admissible avec elle), "
++        f"{params.without_agreement} n'ont abouti à aucun accord et "
++        f"{params.without_saving} n'ont dégagé aucune économie. {alone}"
++    )
++
++
++def _alone_social_optimum(params: AloneSocialOptimumParams) -> str:
++    lines = [
++        (
++            "La répartition retenue maximise la valeur totale du groupe de demandes "
++            f"({euros(params.component_value_cents)}). Elle n'inclut votre demande dans aucune "
++            "coalition : votre demande voyage seule, au prix négocié (simulation) de sa "
++            "référence. Parmi les coalitions évaluées qui incluaient votre demande, voici celles "
++            "qui donnaient la plus grande valeur totale, avec l'écart par rapport à la "
++            "répartition retenue :"
++        )
++    ]
++    for alternative in params.alternatives:
++        line = (
++            f"- coalition de {alternative.size} demandes sur l'offre {alternative.offer_id} : "
++            f"valeur créée {euros(alternative.value_cents)}, valeur totale possible "
++            f"{euros(alternative.best_total_cents)}, "
++        )
++        if alternative.gap_cents == 0:
++            line += (
++                "même valeur totale que la répartition retenue ; celle-ci a été choisie par la "
++                "règle de départage documentée de P4."
++            )
++        else:
++            line += f"écart {euros(alternative.gap_cents)}."
++        lines.append(line)
++    lines.append(
++        "Ce résultat découle de l'objectif collectif ; il ne signifie pas qu'une coalition "
++        "aurait été défavorable à votre demande."
++    )
++    return "\n".join(lines)
++
++
++def _no_admissible_offer(params: NoAdmissibleOfferParams) -> str:
++    offers = _plural(params.rejected_offers, "offre a été écartée", "offres ont été écartées")
++    return (
++        "Aucune offre du catalogue ne correspond à votre demande : "
++        f"{offers} par les règles d'admissibilité (détail par offre)."
++    )
++
++
++def _no_solo_reference(params: NoSoloReferenceParams) -> str:
++    attempts = _plural(params.failed_attempts, "négociation", "négociations")
++    return (
++        f"Aucune négociation individuelle n'a abouti ({attempts} sans accord) : votre demande "
++        "n'a pas de prix de référence et ne peut pas entrer dans une coalition."
++    )
++
++
++def _component_too_large(params: ComponentTooLargeParams) -> str:
++    return (
++        f"Le groupe de demandes compatibles compte {params.component_units} demandes, "
++        f"au-delà de la limite de calcul de {params.max_component_units} : aucune "
++        "répartition n'est calculée pour ce groupe."
++    )
++
++
++def _capacity_model_violated(params: CapacityModelViolatedParams) -> str:
++    offers = ", ".join(params.offer_ids)
++    return (
++        "Les demandes compatibles dépassent la capacité de l'offre ou des offres "
++        f"{offers} dans le modèle de capacité simplifié : aucune négociation n'a été lancée."
++    )
++
++
++def _projection_active(params: ProjectionActiveParams) -> str:
++    text = (
++        "Les contributions calculées ont été ajustées pour qu'aucun paiement ne soit négatif "
++        "ni ne dépasse la référence (projection ; décalage commun "
++        f"{euros_exact(params.lambda_star_cents)})."
++    )
++    if params.unit_saturated:
++        text += " Pour votre demande, l'ajustement atteint une borne."
++    return text
++
++
++def _budget_cap_active(params: BudgetCapActiveParams) -> str:
++    profiles = ", ".join(params.saturated_profile_ids)
++    return (
++        "Le paiement de votre demande est réparti en respectant le budget de chaque "
++        f"voyageur ; le budget est atteint pour le ou les profils : {profiles}. Part égale "
++        f"des autres voyageurs : {euros_exact(params.unit_tau_cents)}."
++    )
++
++
++def _offer_rejected(params: OfferRejectedParams) -> str:
++    reasons = " ; ".join(violation_text(violation) for violation in params.violations)
++    return f"Offre {params.offer_id} écartée : {reasons}."
++
++
++def _direct_preference_not_met(params: DirectPreferenceNotMetParams) -> str:
++    profiles = ", ".join(params.profile_ids)
++    text = (
++        f"La préférence pour un vol direct (profils : {profiles}) n'est pas satisfaite par "
++        f"l'offre retenue {params.offer_id}, au prix catalogue de "
++        f"{euros(params.retained_list_total_cents)} pour les places du bloc."
++    )
++    if params.best_direct is None:
++        return text + " Aucune offre directe admissible ne pouvait accueillir ces places."
++    return text + (
++        f" L'offre directe admissible au plus bas prix catalogue était "
++        f"{params.best_direct.offer_id}, à {euros(params.best_direct.list_total_cents)} "
++        "pour le même nombre de places (information seulement)."
++    )
++
++
++_MESSAGES = {
++    "served_in_coalition": _served,
++    "alone_no_beneficial_coalition": _alone_no_beneficial,
++    "alone_social_optimum": _alone_social_optimum,
++    "no_admissible_offer": _no_admissible_offer,
++    "no_solo_reference": _no_solo_reference,
++    "component_too_large": _component_too_large,
++    "capacity_model_violated": _capacity_model_violated,
++    "projection_active": _projection_active,
++    "budget_cap_active": _budget_cap_active,
++    "offer_rejected": _offer_rejected,
++    "direct_preference_not_met": _direct_preference_not_met,
++}
++
++
++def explanation_message(explanation: Explanation) -> str:
++    """French message of one explanation of a proposal."""
++    if type(explanation) is not Explanation:
++        raise TypeError("explanation must be an Explanation")
++    return _MESSAGES[explanation.code](explanation.params)
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/infrastructure/presentation/json_renderer.py b/Multi-Agent/coalition_travel/infrastructure/presentation/json_renderer.py
+--- a/Multi-Agent/coalition_travel/infrastructure/presentation/json_renderer.py	1970-01-01 01:00:00
++++ b/Multi-Agent/coalition_travel/infrastructure/presentation/json_renderer.py	2026-11-20 04:05:33
+@@ -0,0 +1,265 @@
++"""Canonical JSON of a proposal and closed status documents (scope review §6.4, §7.1).
++
++- A proposal is rendered from a ``TripProposal`` only: field names are the JSON keys,
++  rationals are "p/q" strings (the I2 digest convention), dates are ISO strings, and each
++  explanation also carries its French ``message``.
++- Serialization: ``json.dumps(sort_keys=True, ensure_ascii=False, indent=2)`` plus a
++  final newline, in UTF-8. No duration, so the output is identical byte for byte.
++- ``trip-request-status-v1``: the document written instead of a proposal for exit codes
++  2, 3 and 4 with ``--json``. Its schema is closed for keys **and values** (revision 3):
++  the validator refuses anything outside the tables, before writing.
++- Every rendered text passes the vocabulary rule; a failure is a system defect.
++"""
++
++import json
++import re
++from collections.abc import Mapping
++from dataclasses import fields, is_dataclass
++from datetime import date
++from fractions import Fraction
++
++from pydantic import ValidationError
++
++from coalition_travel.application.request_contracts import (
++    TravelerProfileDraft,
++    TravelRequestDraft,
++)
++from coalition_travel.application.request_understanding import REQUIRED_FIELDS
++from coalition_travel.application.trip_planning import RequestRejection
++from coalition_travel.application.trip_proposal import Explanation, TripProposal
++from coalition_travel.infrastructure.presentation.explanations_fr import explanation_message
++from coalition_travel.infrastructure.presentation.vocabulary import forbidden_words_in
++
++STATUS_SCHEMA = "trip-request-status-v1"
++SOURCES = ("draft-json", "llm", "replay")
++NOT_VALIDATED_REASONS = ("refused", "empty_answer", "end_of_input")
++COMMON_KEYS = frozenset({"schema", "status", "source", "reference_date"})
++STATUS_KEYS = {
++    "needs_clarification": frozenset({"missing_fields", "rounds"}),
++    "invalid": frozenset({"errors"}),
++    "request_rejected": frozenset({"reason", "rejection_status", "missing_fields", "errors"}),
++    "not_validated": frozenset({"reason"}),
++}
++MAX_CLARIFICATION_ROUNDS = 3
++BUDGET_REJECTIONS = frozenset(
++    {"budget_below_one_cent", "budget_out_of_range", "budget_total_out_of_range"}
++)
++
++
++class PresentationError(RuntimeError):
++    """A rendered document breaks its contract (schema or vocabulary): a system defect."""
++
++
++class StatusDocumentError(PresentationError):
++    """A status document is outside the closed schema of trip-request-status-v1."""
++
++
++# --- canonical serialization --------------------------------------------------------------
++
++
++def canonical_json(data) -> str:
++    return json.dumps(data, sort_keys=True, ensure_ascii=False, indent=2) + "\n"
++
++
++def ensure_vocabulary(text: str) -> str:
++    found = forbidden_words_in(text)
++    if found:
++        raise PresentationError(f"forbidden words in a rendered document: {list(found)}")
++    return text
++
++
++def to_data(value):
++    """JSON form of a proposal tree."""
++    if type(value) is Explanation:
++        return {
++            "code": value.code,
++            "level": value.level,
++            "params": to_data(value.params),
++            "message": explanation_message(value),
++        }
++    if is_dataclass(value) and not isinstance(value, type):
++        return {item.name: to_data(getattr(value, item.name)) for item in fields(value)}
++    if isinstance(value, Fraction):
++        return f"{value.numerator}/{value.denominator}"
++    if isinstance(value, date):
++        return value.isoformat()
++    if isinstance(value, Mapping):
++        return {key: to_data(item) for key, item in value.items()}
++    if isinstance(value, tuple | list):
++        return [to_data(item) for item in value]
++    if value is None or isinstance(value, str | int):
++        return value
++    raise TypeError(f"no JSON form for {type(value).__name__}")
++
++
++def render_proposal_json(proposal: TripProposal) -> str:
++    """The canonical JSON of ``trip-proposal-v1``; accepts a TripProposal only."""
++    if type(proposal) is not TripProposal:
++        raise TypeError("the JSON renderer accepts a TripProposal only")
++    return ensure_vocabulary(canonical_json(to_data(proposal)))
++
++
++# --- error strings: the closed domain E (§6.4) --------------------------------------------
++
++DRAFT_FIELD_NAMES = frozenset(TravelRequestDraft.model_fields) | frozenset(
++    TravelerProfileDraft.model_fields
++)
++
++
++def error_path(loc) -> str:
++    """Pydantic location as ``profiles[0].profile_id``; ``$`` is the root, ``?`` an
++    unknown name (never the received key itself)."""
++    path = ""
++    for segment in loc:
++        if isinstance(segment, int) and not isinstance(segment, bool):
++            path += f"[{segment}]"
++        else:
++            name = segment if segment in DRAFT_FIELD_NAMES else "?"
++            path += f".{name}" if path else name
++    return path or "$"
++
++
++def reduce_validation_error(exc: ValidationError) -> tuple[str, ...]:
++    """E8: one ``chemin: type`` line per error, without the received value."""
++    return tuple(f"{error_path(item['loc'])}: {item['type']}" for item in exc.errors())
++
++
++def forbidden_term_error(path: str) -> str:
++    """E9 (D-I3-17)."""
++    return f"forbidden_term: {path}"
++
++
++_NAME = "|".join(re.escape(name) for name in sorted(DRAFT_FIELD_NAMES, key=len, reverse=True))
++_SEGMENT = rf"(?:(?:{_NAME})(?:\[\d+\])*|\?(?:\[\d+\])*)"
++_PATH = rf"(?:\$|{_SEGMENT}(?:\.{_SEGMENT})*)"
++_PROFILE_ID = r"[^\n]{1,80}"
++VALIDATION_FORMS = (  # E1 to E5: the five messages of validate_request_draft
++    re.compile(r"departure_after must not be before the reference date"),
++    re.compile(r"arrival_before must not be before the reference date"),
++    re.compile(r"departure_after must not be after arrival_before"),
++    re.compile(rf"profile {_PROFILE_ID}: departure_after is before reference date"),
++    re.compile(rf"profile {_PROFILE_ID}: arrival_before is before reference date"),
++)
++ERROR_FORMS = VALIDATION_FORMS + (
++    re.compile(r"request text must not be blank"),  # E6
++    re.compile(r"request text exceeds [1-9]\d* characters"),  # E7
++    re.compile(rf"{_PATH}: [a-z][a-z0-9_]*"),  # E8
++    re.compile(rf"forbidden_term: {_PATH}"),  # E9
++)
++
++
++def _matches(text, forms) -> bool:
++    return isinstance(text, str) and any(form.fullmatch(text) for form in forms)
++
++
++# --- status documents ---------------------------------------------------------------------
++
++
++def _common(status: str, source: str, reference_date: date) -> dict:
++    return {
++        "schema": STATUS_SCHEMA,
++        "status": status,
++        "source": source,
++        "reference_date": reference_date.isoformat(),
++    }
++
++
++def needs_clarification_document(*, source, reference_date, missing_fields, rounds) -> dict:
++    return _common("needs_clarification", source, reference_date) | {
++        "missing_fields": list(missing_fields),
++        "rounds": rounds,
++    }
++
++
++def invalid_document(*, source, reference_date, errors) -> dict:
++    return _common("invalid", source, reference_date) | {"errors": list(errors)}
++
++
++def request_rejected_document(*, source, reference_date, rejection: RequestRejection) -> dict:
++    return _common("request_rejected", source, reference_date) | {
++        "reason": rejection.reason,
++        "rejection_status": "other" if rejection.status is None else rejection.status,
++        "missing_fields": list(rejection.missing_fields),
++        "errors": list(rejection.errors),
++    }
++
++
++def not_validated_document(*, source, reference_date, reason) -> dict:
++    return _common("not_validated", source, reference_date) | {"reason": reason}
++
++
++def _ordered_required(values) -> bool:
++    return (
++        isinstance(values, list)
++        and bool(values)
++        and all(isinstance(value, str) for value in values)
++        and values == [field for field in REQUIRED_FIELDS if field in values]
++        and len(set(values)) == len(values)
++    )
++
++
++def _rejected_exit_code(document) -> int:
++    """The five allowed rows of request_rejected (scope review §6.4, revision 3)."""
++    reason = document["reason"]
++    status = document["rejection_status"]
++    missing, errors = document["missing_fields"], document["errors"]
++    if not isinstance(missing, list) or not isinstance(errors, list):
++        raise StatusDocumentError("missing_fields and errors are lists")
++    if reason == "request_not_ready" and status == "needs_clarification":
++        if _ordered_required(missing) and errors == []:
++            return 2
++    elif reason == "request_not_ready" and status == "invalid":
++        if missing == [] and errors and all(_matches(e, VALIDATION_FORMS) for e in errors):
++            return 3
++    elif reason in BUDGET_REJECTIONS and status == "other" and missing == [] and errors == []:
++        return 3
++    raise StatusDocumentError("request_rejected outside its five allowed rows")
++
++
++def validate_status_document(document) -> int:
++    """Check the closed schema, keys and values; return the exit code of the document."""
++    if not isinstance(document, dict):
++        raise StatusDocumentError("a status document is a JSON object")
++    status = document.get("status")
++    if status not in STATUS_KEYS:
++        raise StatusDocumentError("unknown status")
++    if set(document) != COMMON_KEYS | STATUS_KEYS[status]:
++        raise StatusDocumentError("keys differ from the closed schema")
++    if any(value is None for value in document.values()):
++        raise StatusDocumentError("no null value is allowed")
++    if document["schema"] != STATUS_SCHEMA or document["source"] not in SOURCES:
++        raise StatusDocumentError("schema or source outside its domain")
++    reference = document["reference_date"]
++    if not isinstance(reference, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", reference):
++        raise StatusDocumentError("reference_date is an ISO date")
++    try:
++        date.fromisoformat(reference)
++    except ValueError as exc:
++        raise StatusDocumentError("reference_date is an ISO date") from exc
++    if status == "needs_clarification":
++        rounds = document["rounds"]
++        if not _ordered_required(document["missing_fields"]):
++            raise StatusDocumentError("missing_fields: ordered subset of REQUIRED_FIELDS")
++        if type(rounds) is not int or not 0 <= rounds <= MAX_CLARIFICATION_ROUNDS:
++            raise StatusDocumentError("rounds is an integer from 0 to 3")
++        if document["source"] == "draft-json" and rounds != 0:
++            raise StatusDocumentError("no clarification round with --draft-json")
++        return 2
++    if status == "invalid":
++        errors = document["errors"]
++        if not isinstance(errors, list) or not errors:
++            raise StatusDocumentError("errors is a non-empty list")
++        if not all(_matches(error, ERROR_FORMS) for error in errors):
++            raise StatusDocumentError("an error string is outside the domain E")
++        return 3
++    if status == "request_rejected":
++        return _rejected_exit_code(document)
++    if document["reason"] not in NOT_VALIDATED_REASONS:
++        raise StatusDocumentError("reason outside refused, empty_answer, end_of_input")
++    return 4
++
++
++def render_status_json(document) -> tuple[str, int]:
++    """Validated canonical JSON of a status document, with its exit code."""
++    code = validate_status_document(document)
++    return ensure_vocabulary(canonical_json(document)), code
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/infrastructure/presentation/text_renderer.py b/Multi-Agent/coalition_travel/infrastructure/presentation/text_renderer.py
+--- a/Multi-Agent/coalition_travel/infrastructure/presentation/text_renderer.py	1970-01-01 01:00:00
++++ b/Multi-Agent/coalition_travel/infrastructure/presentation/text_renderer.py	2026-11-20 04:05:26
+@@ -0,0 +1,315 @@
++"""Readable terminal presentation of a proposal (specification §9.1, scope review §7.1).
++
++The renderer reads a ``TripProposal`` only, never an internal object of the engine. The
++text follows the canonical order of the JSON and contains no timestamp other than the
++reference date, so it is identical byte for byte for an identical proposal. The
++validated-request summary and the status messages are built from validated fields only;
++the raw text typed by the person is never copied (B9).
++"""
++
++from collections.abc import Mapping
++from decimal import Decimal
++
++from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.trip_proposal import (
++    JournalView,
++    TripProposal,
++)
++from coalition_travel.infrastructure.presentation.explanations_fr import (
++    REQUEST_REJECTION_MESSAGES,
++    euros,
++    euros_exact,
++    explanation_message,
++    forbidden_term_message,
++    needs_clarification_message,
++    violation_text,
++)
++from coalition_travel.infrastructure.presentation.json_renderer import ensure_vocabulary
++
++FORBIDDEN_TERM_PREFIX = "forbidden_term: "
++
++STATUS_LABELS = {
++    "served_in_coalition": "demande servie dans une coalition",
++    "alone_no_beneficial_coalition": "demande traitée seule",
++    "alone_social_optimum": "demande traitée seule",
++    "no_admissible_offer": "aucune offre admissible",
++    "no_solo_reference": "aucun prix de référence",
++    "component_too_large": "groupe de demandes trop grand pour le calcul",
++    "capacity_model_violated": "capacité des offres dépassée",
++}
++DIRECT_LABELS = {"any": "indifférent", "preferred": "préféré", "required": "exigé"}
++ACTOR_LABELS = {"seller": "vendeur", "leader": "mandataire du groupe"}
++TYPE_LABELS = {"PROPOSE": "propose", "ACCEPT": "accepte", "REJECT": "refuse"}
++NEGOTIATION_STATUS_LABELS = {
++    "agreement": "accord",
++    "rejected": "sans accord (refus)",
++    "turn_limit": "sans accord (limite de tours)",
++}
++TERMINAL_REASON_LABELS = {
++    "leader_counteroffers_exhausted": "contre-propositions du mandataire épuisées",
++    "seller_rejected": "refus du vendeur",
++    "router_iteration_limit": "limite de tours atteinte",
++}
++EXTRACTION_LABELS = {
++    "draft-json": "brouillon JSON fourni",
++    "llm": "modèle de langage local",
++    "replay": "rejeu enregistré (test et démonstration)",
++}
++
++
++def _decimal_euros(value) -> str:
++    amount = Decimal(str(value))
++    cents = amount * 100
++    if cents == cents.to_integral_value():
++        return euros(int(cents))
++    return f"{str(amount).replace('.', ',')} €"
++
++
++def _date(value) -> str:
++    return "non précisée" if value is None else str(value)
++
++
++def _suppliers(values) -> str:
++    return ", ".join(values) if values else "aucun"
++
++
++def _request_lines(draft: Mapping) -> list[str]:
++    lines = [
++        f"- destination : {draft['destination']}",
++        f"- voyageurs : {draft['travellers']}",
++        f"- budget par personne : {_decimal_euros(draft['budget_per_person'])}",
++        f"- départ au plus tôt : {_date(draft['departure_after'])}",
++        f"- arrivée au plus tard : {_date(draft['arrival_before'])}",
++        f"- vol direct : {DIRECT_LABELS[draft['direct_flight']]}",
++        f"- fournisseurs exclus : {_suppliers(draft['excluded_suppliers'])}",
++        "- ville de départ : non prise en compte dans cette version",
++    ]
++    for profile in draft["profiles"]:
++        details = [f"{profile['traveller_count']} voyageur(s)"]
++        if profile["budget_per_person"] is not None:
++            details.append(f"budget {_decimal_euros(profile['budget_per_person'])}")
++        if profile["departure_after"] is not None:
++            details.append(f"départ au plus tôt {profile['departure_after']}")
++        if profile["arrival_before"] is not None:
++            details.append(f"arrivée au plus tard {profile['arrival_before']}")
++        if profile["direct_flight"] is not None:
++            details.append(f"vol direct {DIRECT_LABELS[profile['direct_flight']]}")
++        if profile["excluded_suppliers"]:
++            details.append(f"fournisseurs exclus {_suppliers(profile['excluded_suppliers'])}")
++        lines.append(f"- profil {profile['profile_id']} : " + ", ".join(details))
++    return lines
++
++
++def render_request_summary(draft: TravelRequestDraft) -> str:
++    """Summary of the understood request, shown before the validation question."""
++    if not isinstance(draft, TravelRequestDraft):
++        raise TypeError("draft must be a TravelRequestDraft")
++    lines = ["Demande comprise :", *_request_lines(draft.model_dump(mode="json"))]
++    return ensure_vocabulary("\n".join(lines) + "\n")
++
++
++# --- proposal -----------------------------------------------------------------------------
++
++
++def _offer_lines(proposal: TripProposal) -> list[str]:
++    lines = []
++    for offer in proposal.offers:
++        kind = "vol direct" if offer.direct else "avec escale"
++        lines.append(
++            f"- {offer.offer_id} : {offer.supplier_id}, {offer.destination}, départ "
++            f"{offer.departure_date}, arrivée {offer.arrival_date}, {kind}, capacité "
++            f"{offer.capacity_seats} places"
++        )
++        tiers = " ; ".join(
++            f"dès {tier.min_seats} place(s) : {euros(tier.list_per_seat_cents)} par place"
++            for tier in offer.tiers
++        )
++        lines.append(f"  prix catalogue : {tiers}")
++        if offer.admissible:
++            lines.append("  admissible pour votre demande")
++        else:
++            reasons = " ; ".join(violation_text(v) for v in offer.violations)
++            lines.append(f"  écartée : {reasons}")
++        for note in offer.notes:
++            if note.code == "direct_preference_not_met":
++                lines.append(
++                    f"  note : préférence pour un vol direct non satisfaite (profil "
++                    f"{note.profile_id})"
++                )
++    return lines
++
++
++def _journal_lines(journal: JournalView, indent: str) -> list[str]:
++    status = NEGOTIATION_STATUS_LABELS.get(journal.status, journal.status)
++    head = (
++        f"{indent}{journal.quantity_seats} place(s), palier dès "
++        f"{journal.price_tier_min_seats} place(s), prix catalogue "
++        f"{euros(journal.catalog_total_cents)} ; {status} en {journal.turns} tour(s)"
++    )
++    if journal.agreed_total_cents is not None:
++        head += f", prix négocié (simulation) {euros(journal.agreed_total_cents)}"
++    if journal.terminal_reason is not None:
++        head += f" ({TERMINAL_REASON_LABELS.get(journal.terminal_reason, journal.terminal_reason)})"
++    lines = [head]
++    if journal.leader_initial_total_cents is not None:
++        lines.append(
++            f"{indent}première offre du mandataire : {euros(journal.leader_initial_total_cents)}"
++        )
++    for message in journal.messages:
++        actor = ACTOR_LABELS.get(message.actor, message.actor)
++        verb = TYPE_LABELS.get(message.type, message.type)
++        if message.total_cents is not None:
++            amount = euros(message.total_cents)
++        elif message.actor == "leader" and journal.leader_initial_total_cents is None:
++            amount = "montant non publié"
++        else:
++            amount = "sans montant"
++        lines.append(f"{indent}{message.index}. {actor} {verb} : {amount}")
++    return lines
++
++
++def _solo_lines(proposal: TripProposal) -> list[str]:
++    solo = proposal.solo
++    if solo is None:
++        return ["Aucune négociation : la capacité des offres est dépassée."]
++    if solo.status == "no_admissible_offer":
++        return ["Aucune négociation : aucune offre admissible."]
++    lines = []
++    if solo.status == "referenced":
++        lines.append(
++            f"Prix de référence de votre demande : {euros(solo.agreed_total_cents)} "
++            f"(offre {solo.offer_id}, prix négocié (simulation))"
++        )
++    else:
++        lines.append("Aucune négociation individuelle n'a abouti.")
++    for attempt in solo.attempts:
++        lines.append(f"- offre {attempt.offer_id} :")
++        lines.extend(_journal_lines(attempt.journal, "  "))
++    return lines
++
++
++def _block_lines(proposal: TripProposal) -> list[str]:
++    block = proposal.block
++    lines = [
++        f"Offre commune : {block.offer_id}",
++        f"Places : {block.seats} (palier dès {block.price_tier_min_seats} place(s))",
++        f"Prix catalogue : {euros(block.catalog_total_cents)}",
++        f"Prix négocié (simulation) : {euros(block.cost_cents)}",
++        f"Somme des prix de référence : {euros(block.reference_total_cents)}",
++        f"Valeur créée (économie collective) : {euros(block.value_cents)}",
++        "Membres :",
++    ]
++    for member in block.members:
++        places = f"{member.seats} place(s)"
++        lines.append(f"- {member.label} : {places}, paiement {euros(member.payment_cents)}")
++    if block.negotiation is not None:
++        lines.append("Négociation du groupe (montants du mandataire non publiés) :")
++        lines.extend(_journal_lines(block.negotiation, "  "))
++    return lines
++
++
++def _allocation_lines(proposal: TripProposal) -> list[str]:
++    allocation = proposal.allocation
++    return [
++        f"Prix de référence de votre demande : {euros(allocation.reference_cents)}",
++        f"Contribution à la valeur créée (Shapley) : {euros_exact(allocation.phi_cents)}",
++        f"Économie après ajustement : {euros_exact(allocation.y_cents)}",
++        f"Économie de votre demande : {euros(allocation.saving_cents)}",
++        f"Paiement de votre demande : {euros(allocation.payment_cents)}",
++    ]
++
++
++def _traveller_lines(proposal: TripProposal) -> list[str]:
++    lines = []
++    for traveller in proposal.travellers:
++        line = (
++            f"- profil {traveller.profile_id}, place {traveller.seat_rank} : "
++            f"{euros(traveller.amount_cents)} (budget {euros(traveller.budget_cents)})"
++        )
++        if traveller.profile_saturated:
++            line += ", budget atteint"
++        lines.append(line)
++    return lines
++
++
++def _provenance_lines(proposal: TripProposal) -> list[str]:
++    provenance = proposal.provenance
++    extraction = provenance.extraction
++    source = EXTRACTION_LABELS[extraction.source]
++    if extraction.model is not None:
++        source += f" ({extraction.provider}, {extraction.model})"
++    return [
++        f"- date de référence : {provenance.reference_date}",
++        f"- catalogue : {provenance.catalog_version}",
++        f"- carnet de demandes : {provenance.pool_version or 'aucun'}",
++        f"- planification : {provenance.planning_version}",
++        f"- formation : {provenance.formation_adapter_version} ({provenance.formation_method})",
++        f"- allocation : {provenance.allocation_version} (θ = {provenance.theta_cents})",
++        f"- extraction de la demande : {source}",
++    ]
++
++
++def render_proposal_text(proposal: TripProposal) -> str:
++    """The proposal as readable text; accepts a TripProposal only."""
++    if type(proposal) is not TripProposal:
++        raise TypeError("the text renderer accepts a TripProposal only")
++    status = proposal.explanations[0]
++    sections = [
++        [proposal.simulation.notice, f"Date de référence : {proposal.provenance.reference_date}"],
++        ["== Demande validée ==", *_request_lines(proposal.request.draft)],
++        [
++            "== Résultat ==",
++            f"Statut : {STATUS_LABELS[proposal.status.code]}",
++            explanation_message(status),
++        ],
++        ["== Offres du catalogue ==", *_offer_lines(proposal)],
++        ["== Négociations individuelles (simulation) ==", *_solo_lines(proposal)],
++    ]
++    if proposal.block is not None:
++        title = "== Groupe constitué ==" if len(proposal.block.members) > 1 else "== Votre bloc =="
++        sections.append([title, *_block_lines(proposal)])
++        sections.append(["== Répartition calculée ==", *_allocation_lines(proposal)])
++        sections.append(["== Paiements par voyageur ==", *_traveller_lines(proposal)])
++    others = list(proposal.explanations[1:])
++    if others:
++        sections.append(
++            ["== Explications ==", *(f"- {explanation_message(item)}" for item in others)]
++        )
++    sections.append(["== Provenance ==", *_provenance_lines(proposal)])
++    text = "\n\n".join("\n".join(section) for section in sections) + "\n"
++    return ensure_vocabulary(text)
++
++
++# --- status messages (standard error) -----------------------------------------------------
++
++
++def _invalid_text(errors) -> str:
++    lines = ["Demande invalide (détail technique) :"]
++    for error in errors:
++        if error.startswith(FORBIDDEN_TERM_PREFIX):
++            lines.append(f"- {forbidden_term_message(error[len(FORBIDDEN_TERM_PREFIX) :])}")
++        else:
++            lines.append(f"- {error}")
++    return "\n".join(lines)
++
++
++def render_status_text(document: Mapping) -> str:
++    """Message for a request without proposal (exit codes 2, 3 and 4)."""
++    status = document["status"]
++    if status == "needs_clarification":
++        text = "Clarification requise. " + needs_clarification_message(document["missing_fields"])
++    elif status == "invalid":
++        text = _invalid_text(document["errors"])
++    elif status == "request_rejected":
++        reason = document["reason"]
++        if reason in REQUEST_REJECTION_MESSAGES:
++            text = "Demande non retenue. " + REQUEST_REJECTION_MESSAGES[reason]
++        elif document["rejection_status"] == "needs_clarification":
++            text = "Clarification requise. " + needs_clarification_message(
++                document["missing_fields"]
++            )
++        else:
++            text = _invalid_text(document["errors"])
++    else:
++        text = "Demande non validée : aucune simulation n'a été lancée."
++    return ensure_vocabulary(text + "\n")
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/coalition_travel/infrastructure/presentation/vocabulary.py b/Multi-Agent/coalition_travel/infrastructure/presentation/vocabulary.py
+--- a/Multi-Agent/coalition_travel/infrastructure/presentation/vocabulary.py	1970-01-01 01:00:00
++++ b/Multi-Agent/coalition_travel/infrastructure/presentation/vocabulary.py	2026-11-20 04:02:44
+@@ -0,0 +1,68 @@
++"""Vocabulary rule of the simulated proposal (plan §1.2; scope review §7.2, D-I3-17).
++
++The rule is normative and has no exception: the text is put in NFC, case-folded, split
++into whole words at Unicode word boundaries (``re.findall(r"\\w+")``), and each word is
++compared with the forbidden list. Words that merely *contain* a forbidden word
++("réservation", "émission", "confirmation") pass.
++
++User-supplied strings are never rewritten (D-I3-17): a request whose destination,
++profile identifier or excluded supplier contains a forbidden word is refused before any
++display, with a message that names the field and never quotes the value.
++"""
++
++import re
++import unicodedata
++from collections.abc import Iterator
++
++from coalition_travel.application.request_contracts import TravelRequestDraft
++
++FORBIDDEN_WORDS = frozenset(
++    unicodedata.normalize("NFC", word)
++    for word in (
++        "billet",
++        "billets",
++        "réservé",
++        "réservée",
++        "réservés",
++        "réservées",
++        "confirmé",
++        "confirmée",
++        "confirmés",
++        "confirmées",
++        "émis",
++        "émise",
++        "émises",
++    )
++)
++_WORD = re.compile(r"\w+")
++
++
++def words(text: str) -> list[str]:
++    """Whole words of ``text`` after NFC and casefold, at Unicode word boundaries."""
++    folded = unicodedata.normalize("NFC", unicodedata.normalize("NFC", text).casefold())
++    return _WORD.findall(folded)
++
++
++def forbidden_words_in(text: str) -> tuple[str, ...]:
++    return tuple(sorted({word for word in words(text) if word in FORBIDDEN_WORDS}))
++
++
++def contains_forbidden_word(text: str) -> bool:
++    return bool(forbidden_words_in(text))
++
++
++def user_strings(draft: TravelRequestDraft) -> Iterator[tuple[str, str]]:
++    """(path, value) of every free string supplied by the person (D-I3-17)."""
++    if draft.destination is not None:
++        yield "destination", draft.destination
++    for index, supplier in enumerate(draft.excluded_suppliers):
++        yield f"excluded_suppliers[{index}]", supplier
++    for index, profile in enumerate(draft.profiles):
++        yield f"profiles[{index}].profile_id", profile.profile_id
++        for position, supplier in enumerate(profile.excluded_suppliers or ()):
++            yield f"profiles[{index}].excluded_suppliers[{position}]", supplier
++
++
++def forbidden_user_fields(draft: TravelRequestDraft) -> tuple[str, ...]:
++    """Paths of the user strings that contain a forbidden word, in field order."""
++    return tuple(path for path, value in user_strings(draft) if contains_forbidden_word(value))
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/Multi-Agent/plan_trip.py b/Multi-Agent/plan_trip.py
+--- a/Multi-Agent/plan_trip.py	1970-01-01 01:00:00
++++ b/Multi-Agent/plan_trip.py	2026-11-20 04:09:58
+@@ -0,0 +1,373 @@
++"""coalition-travel-plan: one travel request to a simulated proposal (step I3-C).
++
++Flow (scope review §6.2): options, reference date, catalogue v1 and demand pool v1, the
++request (``--draft-json``, ``--prompt`` or interactive input, with at most three
++clarification rounds), the vocabulary check of the person's strings (D-I3-17), the summary
++of the understood request, the explicit validation (ID-10, unless ``--yes``), then
++``plan_travel_request`` and the text or JSON output.
++
++Streams: standard output receives only the final document (the proposal, or with
++``--json`` the status document of §6.4); questions, summary and messages go to standard
++error. Exit codes: 0 proposal, 1 technical error, 2 clarification needed, 3 invalid
++request, 4 request not validated, 64 incorrect usage, 130 interruption.
++
++Demonstration mode only (ID-1): the versioned catalogue v1 and demand pool v1.
++"""
++
++import argparse
++import asyncio
++import os
++import re
++import sys
++from datetime import date
++from pathlib import Path
++
++from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.request_understanding import (
++    RequestInputError,
++    understand_request,
++    validate_request_draft,
++)
++from coalition_travel.application.travel_workflow import plan_travel_request
++from coalition_travel.application.trip_proposal import (
++    draft_json_extraction,
++    llm_extraction,
++    replay_extraction,
++)
++from coalition_travel.infrastructure.demand.demand_pool import load_demand_pool
++from coalition_travel.infrastructure.llm.ollama import OllamaStructuredRequestExtractor
++from coalition_travel.infrastructure.llm.replay import ReplayStructuredRequestExtractor
++from coalition_travel.infrastructure.negotiation.market import open_simulated_market
++from coalition_travel.infrastructure.presentation.explanations_fr import CLARIFICATION_QUESTIONS
++from coalition_travel.infrastructure.presentation.json_renderer import (
++    forbidden_term_error,
++    invalid_document,
++    needs_clarification_document,
++    not_validated_document,
++    reduce_validation_error,
++    render_proposal_json,
++    render_status_json,
++    request_rejected_document,
++)
++from coalition_travel.infrastructure.presentation.text_renderer import (
++    render_proposal_text,
++    render_request_summary,
++    render_status_text,
++)
++from coalition_travel.infrastructure.presentation.vocabulary import forbidden_user_fields
++from pydantic import ValidationError
++
++ROOT = Path(__file__).resolve().parents[1]
++CATALOG_PATH = ROOT / "data" / "catalog" / "catalog_v1.json"
++POOL_PATH = ROOT / "data" / "demand" / "demand_pool_v1.jsonl"
++
++EXIT_OK = 0
++EXIT_TECHNICAL = 1
++EXIT_CLARIFICATION = 2
++EXIT_INVALID = 3
++EXIT_NOT_VALIDATED = 4
++EXIT_USAGE = 64  # sysexits EX_USAGE (D-I3-3)
++EXIT_INTERRUPTED = 130
++
++MAX_CLARIFICATION_ROUNDS = 3
++ACCEPTED_ANSWERS = frozenset({"o", "oui"})
++REQUEST_QUESTION = "Décrivez votre demande de voyage : "
++VALIDATION_QUESTION = "Valider cette demande et lancer la simulation ? [o/N] "
++_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
++_ABSOLUTE_PATH = re.compile(r"(?<![\w.])/(?:[^\s'\":/]+/)+[^\s'\":/]*")
++
++
++class UsageError(Exception):
++    """Incorrect use of the command: exit code 64, with a message in French."""
++
++
++class _Parser(argparse.ArgumentParser):
++    def error(self, message):
++        if message.startswith("unrecognized arguments"):
++            raise UsageError("option inconnue.")
++        if "expected one argument" in message:
++            raise UsageError("une option attend une valeur.")
++        raise UsageError("options incorrectes.")
++
++
++def build_parser() -> argparse.ArgumentParser:
++    parser = _Parser(
++        prog="coalition-travel-plan",
++        description=(
++            "Proposition simulée pour une demande de voyage : catalogue et vendeurs fictifs, "
++            "aucune réservation."
++        ),
++    )
++    source = parser.add_argument_group("demande")
++    source.add_argument("--prompt", metavar="TEXTE", help="demande en langage naturel")
++    source.add_argument(
++        "--draft-json", metavar="FICHIER", help="demande structurée (TravelRequestDraft)"
++    )
++    source.add_argument(
++        "--extractor-replay",
++        metavar="FICHIER",
++        help="rejeu de brouillons enregistrés, à la place du modèle (test et démonstration)",
++    )
++    parser.add_argument(
++        "--reference-date", metavar="AAAA-MM-JJ", help="date de référence (défaut : aujourd'hui)"
++    )
++    parser.add_argument("--yes", action="store_true", help="valider la demande sans question")
++    parser.add_argument("--json", action="store_true", help="sortie JSON canonique")
++    return parser
++
++
++class _Command:
++    def __init__(self, stdin, stdout, stderr, environ, open_market, load_pool, today):
++        self.stdin, self.stdout, self.stderr = stdin, stdout, stderr
++        self.environ, self.open_market, self.load_pool = environ, open_market, load_pool
++        self.today = today
++        self.paths: dict[str, str] = {}
++        self.source = "draft-json"
++        self.reference_date: date | None = None
++        self.as_json = False
++
++    # --- streams --------------------------------------------------------------------
++
++    def say(self, text: str) -> None:
++        self.stderr.write(text if text.endswith("\n") else text + "\n")
++        self.stderr.flush()
++
++    def ask(self, question: str) -> str:
++        self.stderr.write(question)
++        self.stderr.flush()
++        return self.stdin.readline()
++
++    def sanitize(self, message: str) -> str:
++        """No file path in any message (B10): known paths become names, others a mark."""
++        for path, label in sorted(self.paths.items(), key=lambda item: -len(item[0])):
++            message = message.replace(path, label)
++        return _ABSOLUTE_PATH.sub("<chemin>", message)
++
++    def remember(self, path, label: str) -> None:
++        for variant in {str(path), str(Path(path).absolute()), str(Path(path).resolve())}:
++            self.paths[variant] = label
++
++    # --- steps ----------------------------------------------------------------------
++
++    def parse(self, argv):
++        args = build_parser().parse_args(argv)
++        if args.prompt is not None and args.draft_json is not None:
++            raise UsageError("--prompt et --draft-json ne peuvent pas être utilisées ensemble.")
++        if args.extractor_replay is not None and args.draft_json is not None:
++            raise UsageError("--extractor-replay ne s'utilise qu'avec --prompt ou la saisie.")
++        if args.reference_date is None:
++            self.reference_date = self.today()
++        else:
++            try:
++                if not _ISO_DATE.fullmatch(args.reference_date):
++                    raise ValueError
++                self.reference_date = date.fromisoformat(args.reference_date)
++            except ValueError:
++                raise UsageError("la date de référence doit avoir la forme AAAA-MM-JJ.") from None
++        self.as_json = args.json
++        return args
++
++    def read_inputs(self, args):
++        """Input files are read with the options: an unreadable file is a usage error."""
++        draft_bytes = extractor = None
++        if args.draft_json is not None:
++            self.remember(args.draft_json, "--draft-json")
++            try:
++                draft_bytes = Path(args.draft_json).read_bytes()
++            except OSError:
++                raise UsageError("Fichier de --draft-json introuvable ou illisible.") from None
++            return draft_bytes, None
++        if args.extractor_replay is not None:
++            self.remember(args.extractor_replay, "--extractor-replay")
++            self.source = "replay"
++            try:
++                extractor = ReplayStructuredRequestExtractor(args.extractor_replay)
++            except OSError:
++                raise UsageError(
++                    "Fichier de --extractor-replay introuvable ou illisible."
++                ) from None
++            return None, extractor
++        model = self.environ.get("OLLAMA_MODEL", "").strip()
++        if not model:
++            raise UsageError(
++                "--prompt et la saisie demandent la variable OLLAMA_MODEL, "
++                "ou l'option --extractor-replay."
++            )
++        self.source = "llm"
++        base_url = self.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
++        return None, OllamaStructuredRequestExtractor(model, base_url=base_url)
++
++    def extraction(self, extractor):
++        if self.source == "draft-json":
++            return draft_json_extraction()
++        if self.source == "replay":
++            return replay_extraction()
++        return llm_extraction(extractor.model)
++
++    def common(self) -> dict:
++        return {"source": self.source, "reference_date": self.reference_date}
++
++    def from_draft_json(self, draft_bytes):
++        try:
++            draft = TravelRequestDraft.model_validate_json(draft_bytes)
++        except ValidationError as exc:
++            return invalid_document(errors=reduce_validation_error(exc), **self.common())
++        refused = self.refuse_forbidden_strings(draft)
++        if refused is not None:
++            return refused
++        validation = validate_request_draft(draft, self.reference_date)
++        if validation.status == "needs_clarification":
++            return needs_clarification_document(
++                missing_fields=validation.missing_fields, rounds=0, **self.common()
++            )
++        if validation.status == "invalid":
++            return invalid_document(errors=validation.errors, **self.common())
++        return draft
++
++    def refuse_forbidden_strings(self, draft):
++        """D-I3-17: before any display derived from the request, without rewriting it."""
++        paths = forbidden_user_fields(draft)
++        if not paths:
++            return None
++        return invalid_document(
++            errors=[forbidden_term_error(path) for path in paths], **self.common()
++        )
++
++    def from_text(self, text, extractor):
++        if text is None:
++            text = self.ask(REQUEST_QUESTION).rstrip("\n")
++        rounds = 0
++        while True:
++            try:
++                result = asyncio.run(understand_request(text, extractor, self.reference_date))
++            except RequestInputError as exc:
++                return invalid_document(errors=[str(exc)], **self.common())
++            if result.request is not None:
++                refused = self.refuse_forbidden_strings(result.request)
++                if refused is not None:
++                    return refused
++            if result.status == "ready":
++                return result.request
++            if result.status == "invalid":
++                return invalid_document(errors=result.errors, **self.common())
++            missing = result.missing_fields
++            if rounds == MAX_CLARIFICATION_ROUNDS:
++                return needs_clarification_document(
++                    missing_fields=missing, rounds=rounds, **self.common()
++                )
++            questions = " ".join(CLARIFICATION_QUESTIONS[field] for field in missing)
++            answer = self.ask(f"Précision {rounds + 1}/{MAX_CLARIFICATION_ROUNDS} : {questions} ")
++            if answer == "":  # end of input during a round
++                return needs_clarification_document(
++                    missing_fields=missing, rounds=rounds, **self.common()
++                )
++            text = text + "\n" + answer.rstrip("\n")
++            rounds += 1
++
++    def validated(self, yes: bool):
++        """None when the person validates; otherwise the not_validated document."""
++        if yes:
++            return None
++        answer = self.ask(VALIDATION_QUESTION)
++        if answer == "":
++            reason = "end_of_input"
++        elif not answer.strip():
++            reason = "empty_answer"
++        elif answer.strip().casefold() in ACCEPTED_ANSWERS:
++            return None
++        else:
++            reason = "refused"
++        return not_validated_document(reason=reason, **self.common())
++
++    def finish_with_status(self, document) -> int:
++        text, code = render_status_json(document)  # validated before any writing
++        self.say(render_status_text(document))
++        if self.as_json:
++            self.stdout.write(text)
++            self.stdout.flush()
++        return code
++
++    def execute(self, argv) -> int:
++        args = self.parse(argv)
++        draft_bytes, extractor = self.read_inputs(args)
++        self.remember(CATALOG_PATH, CATALOG_PATH.name)
++        self.remember(POOL_PATH, POOL_PATH.name)
++        market = self.open_market(CATALOG_PATH, self.reference_date)
++        pool = self.load_pool(POOL_PATH)
++        if draft_bytes is not None:
++            obtained = self.from_draft_json(draft_bytes)
++        else:
++            obtained = self.from_text(args.prompt, extractor)
++        if not isinstance(obtained, TravelRequestDraft):
++            return self.finish_with_status(obtained)
++        draft = obtained
++        self.say(render_request_summary(draft))
++        refusal = self.validated(args.yes)
++        if refusal is not None:
++            return self.finish_with_status(refusal)
++        self.say("Demande validée : simulation en cours.")
++        result = plan_travel_request(
++            draft,
++            market=market,
++            pool=pool,
++            reference_date=self.reference_date,
++            extraction=self.extraction(extractor),
++        )
++        if result.proposal is None:
++            rejection = result.plan.rejections[0]
++            return self.finish_with_status(
++                request_rejected_document(rejection=rejection, **self.common())
++            )
++        if self.as_json:
++            output = render_proposal_json(result.proposal)
++        else:
++            output = render_proposal_text(result.proposal)
++        self.stdout.write(output)
++        self.stdout.flush()
++        return EXIT_OK
++
++
++def run(
++    argv,
++    *,
++    stdin=None,
++    stdout=None,
++    stderr=None,
++    environ=None,
++    open_market=open_simulated_market,
++    load_pool=load_demand_pool,
++    today=date.today,
++) -> int:
++    """Run the command and return its exit code; the streams can be replaced in tests."""
++    command = _Command(
++        stdin or sys.stdin,
++        stdout or sys.stdout,
++        stderr or sys.stderr,
++        os.environ if environ is None else environ,
++        open_market,
++        load_pool,
++        today,
++    )
++    try:
++        return command.execute(argv)
++    except KeyboardInterrupt:
++        command.say("\nInterruption : aucune proposition n'a été produite.")
++        return EXIT_INTERRUPTED
++    except UsageError as exc:
++        command.say(f"Usage incorrect : {exc}")
++        command.say(build_parser().format_usage())
++        return EXIT_USAGE
++    except OSError as exc:
++        command.say(f"Erreur technique : {type(exc).__name__}: {exc.strerror or 'erreur système'}")
++        return EXIT_TECHNICAL
++    except Exception as exc:  # noqa: BLE001 -- top level: any other failure is technical (code 1)
++        command.say(f"Erreur technique : {type(exc).__name__}: {command.sanitize(str(exc))}")
++        return EXIT_TECHNICAL
++
++
++def main() -> None:
++    sys.exit(run(sys.argv[1:]))
++
++
++if __name__ == "__main__":
++    main()
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/tests/test_plan_trip_cli.py b/tests/test_plan_trip_cli.py
+--- a/tests/test_plan_trip_cli.py	1970-01-01 01:00:00
++++ b/tests/test_plan_trip_cli.py	2026-11-20 04:11:34
+@@ -0,0 +1,573 @@
++"""I3-C: plan_travel_request and the command coalition-travel-plan (scope review §6, §9).
++
++Most scenarios run the command in a subprocess (specification §10.4, I3-A11); the
++interruption test sends a real SIGINT (T-SIGINT). The counters of I3-A13 are checked at
++function level, through ``plan_trip.run`` with a counting market.
++"""
++
++import hashlib
++import io
++import json
++import os
++import select
++import signal
++import subprocess
++import sys
++import time
++from datetime import date
++from pathlib import Path
++
++import plan_trip
++import pytest
++from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.travel_workflow import (
++    TravelPlanningResult,
++    plan_travel_request,
++)
++from coalition_travel.application.trip_proposal import (
++    build_trip_proposal,
++    draft_json_extraction,
++    replay_extraction,
++)
++from coalition_travel.infrastructure.demand.demand_pool import load_demand_pool
++from coalition_travel.infrastructure.llm.replay import ReplayStructuredRequestExtractor
++from coalition_travel.infrastructure.negotiation.market import open_simulated_market
++from coalition_travel.infrastructure.presentation.json_renderer import (
++    canonical_json,
++    validate_status_document,
++)
++from coalition_travel.infrastructure.presentation.vocabulary import forbidden_words_in
++from p4_support import REFERENCE
++
++ROOT = Path(__file__).resolve().parents[1]
++SCRIPT = ROOT / "Multi-Agent" / "plan_trip.py"
++CATALOG_PATH = ROOT / "data/catalog/catalog_v1.json"
++POOL_PATH = ROOT / "data/demand/demand_pool_v1.jsonl"
++DATE = ["--reference-date", "2026-11-19"]
++E3 = {"destination": "Tokyo", "travellers": 8, "budget_per_person": "500"}
++MISSING_BUDGET = {"destination": "Tokyo", "travellers": 8}
++REQUEST_QUESTION = "Décrivez votre demande de voyage"
++VALIDATION_QUESTION = "Valider cette demande et lancer la simulation ? [o/N]"
++POSIX = os.name == "posix"
++
++
++def environment(**extra):
++    env = {k: v for k, v in os.environ.items() if not k.startswith("OLLAMA_")}
++    env.update(PYTHONDONTWRITEBYTECODE="1", PYTHONIOENCODING="utf-8")
++    env.update(extra)
++    return env
++
++
++def cli(tmp_path, *args, stdin="", env=None):
++    return subprocess.run(
++        [sys.executable, "-B", str(SCRIPT), *map(str, args)],
++        input=stdin,
++        capture_output=True,
++        text=True,
++        encoding="utf-8",
++        cwd=tmp_path,
++        env=env or environment(),
++        timeout=180,
++        check=False,
++    )
++
++
++def write(tmp_path, name, content):
++    path = tmp_path / name
++    path.write_text(content if isinstance(content, str) else json.dumps(content), "utf-8")
++    return path
++
++
++def check_clean(result):
++    """No forbidden word and no traceback in any output of the command (T-LEX)."""
++    for text in (result.stdout, result.stderr):
++        assert not forbidden_words_in(text)
++    assert "Traceback" not in result.stderr
++
++
++@pytest.fixture(scope="module")
++def e3_json(tmp_path_factory):
++    tmp_path = tmp_path_factory.mktemp("e3")
++    path = write(tmp_path, "e3.json", E3)
++    result = cli(tmp_path, "--draft-json", path, *DATE, "--yes", "--json")
++    assert result.returncode == 0, result.stderr
++    return result
++
++
++# --- plan_travel_request (§6.1) --------------------------------------------------------------
++
++
++def test_plan_travel_request_returns_the_plan_and_its_proposal():
++    pool = load_demand_pool(POOL_PATH)
++    draft = TravelRequestDraft(**E3)
++    market = open_simulated_market(CATALOG_PATH, REFERENCE)
++    result = plan_travel_request(
++        draft, market=market, pool=pool, reference_date=REFERENCE, extraction=replay_extraction()
++    )
++    assert result.plan.status == "planned"
++    assert result.proposal == build_trip_proposal(
++        result.plan, request_id="user", draft=draft, extraction=replay_extraction()
++    )
++    assert result.proposal.allocation.payment_cents == 380_100
++
++
++def test_plan_travel_request_rejected_has_no_proposal():
++    pool = load_demand_pool(POOL_PATH)
++    market = open_simulated_market(CATALOG_PATH, REFERENCE)
++    result = plan_travel_request(
++        TravelRequestDraft(destination="Tokyo", travellers=2),
++        market=market,
++        pool=pool,
++        reference_date=REFERENCE,
++        extraction=draft_json_extraction(),
++    )
++    assert result.proposal is None and result.plan.status == "request_rejected"
++    rejection = result.plan.rejections[0]
++    assert (rejection.reason, rejection.status) == ("request_not_ready", "needs_clarification")
++    with pytest.raises(ValueError):
++        TravelPlanningResult(result.plan, object())
++
++
++# --- I3-A11: scenarios by subprocess -----------------------------------------------------------
++
++
++def test_draft_json_end_to_end_e3(e3_json):
++    data = json.loads(e3_json.stdout)
++    assert e3_json.stdout == canonical_json(data)  # one JSON document and nothing else
++    assert data["status"]["code"] == "served_in_coalition"
++    assert data["allocation"]["payment_cents"] == 380_100
++    assert sorted(t["amount_cents"] for t in data["travellers"]) == [47_512] * 4 + [47_513] * 4
++    assert [m["label"] for m in data["block"]["members"]] == [
++        "vous",
++        "autre demande 1",
++        "autre demande 2",
++        "autre demande 3",
++    ]
++    assert data["provenance"]["extraction"] == {
++        "model": None,
++        "provider": None,
++        "source": "draft-json",
++    }
++    assert data["provenance"]["reference_date"] == "2026-11-19"
++    assert "Demande comprise :" in e3_json.stderr and VALIDATION_QUESTION not in e3_json.stderr
++    check_clean(e3_json)
++
++
++def test_output_is_identical_byte_for_byte_across_runs(tmp_path, e3_json):
++    path = write(tmp_path, "e3.json", E3)
++    again = cli(tmp_path, "--draft-json", path, *DATE, "--yes", "--json")
++    assert again.stdout == e3_json.stdout
++    text_1 = cli(tmp_path, "--draft-json", path, *DATE, "--yes")
++    text_2 = cli(tmp_path, "--draft-json", path, *DATE, "--yes")
++    assert text_1.returncode == 0 and text_1.stdout == text_2.stdout
++    assert text_1.stdout.startswith("Proposition simulée : catalogue et vendeurs fictifs.")
++    check_clean(text_1)
++
++
++@pytest.mark.parametrize("answer", ["o\n", "oui\n", "  OUI  \n"])
++def test_validation_accepted(tmp_path, answer):
++    path = write(tmp_path, "e3.json", E3)
++    result = cli(tmp_path, "--draft-json", path, *DATE, stdin=answer)
++    assert result.returncode == 0
++    assert VALIDATION_QUESTION in result.stderr
++    assert "Paiement de votre demande : 3 801,00 €" in result.stdout
++
++
++@pytest.mark.parametrize(
++    ("answer", "reason"),
++    [("non\n", "refused"), ("y\n", "refused"), ("\n", "empty_answer"), ("", "end_of_input")],
++)
++def test_validation_not_given_is_exit_4(tmp_path, answer, reason):
++    path = write(tmp_path, "e3.json", E3)
++    text = cli(tmp_path, "--draft-json", path, *DATE, stdin=answer)
++    assert (text.returncode, text.stdout) == (4, "")
++    assert "aucune simulation n'a été lancée" in text.stderr
++    result = cli(tmp_path, "--draft-json", path, *DATE, "--json", stdin=answer)
++    document = json.loads(result.stdout)
++    assert result.returncode == validate_status_document(document) == 4
++    assert document["reason"] == reason
++    check_clean(result)
++
++
++def test_prompt_with_the_replay_extractor(tmp_path, e3_json):
++    replay = write(tmp_path, "r1.json", [E3])
++    result = cli(
++        tmp_path,
++        "--prompt",
++        "Tokyo pour huit",
++        "--extractor-replay",
++        replay,
++        *DATE,
++        "--yes",
++        "--json",
++    )
++    assert result.returncode == 0, result.stderr
++    data, reference = json.loads(result.stdout), json.loads(e3_json.stdout)
++    assert data["provenance"].pop("extraction") == {
++        "model": "replay-v1",
++        "provider": "replay",
++        "source": "replay",
++    }
++    reference["provenance"].pop("extraction")
++    assert data == reference
++
++
++def test_interactive_input(tmp_path):
++    replay = write(tmp_path, "r1.json", [E3])
++    result = cli(tmp_path, "--extractor-replay", replay, *DATE, stdin="Tokyo pour huit\no\n")
++    assert result.returncode == 0, result.stderr
++    assert REQUEST_QUESTION in result.stderr
++    assert "Tokyo pour huit" not in result.stdout + result.stderr  # never copied (B9)
++
++
++def test_clarification_with_scripted_input(tmp_path):
++    replay = write(tmp_path, "r.json", [MISSING_BUDGET, E3])
++    result = cli(tmp_path, "--extractor-replay", replay, *DATE, stdin="Tokyo\n500 euros\no\n")
++    assert result.returncode == 0, result.stderr
++    assert result.stderr.count("Précision 1/3 : Quel est le budget par personne, en euros ?") == 1
++
++
++def test_three_rounds_at_most_and_a_fourth_answer_is_never_read(tmp_path):
++    """I3-A12: a fifth, complete draft would be used if a fourth round took place."""
++    replay = write(tmp_path, "r.json", [MISSING_BUDGET] * 4 + [E3])
++    answers = "Tokyo\n" + "".join(f"réponse {k}\n" for k in range(1, 5)) + "o\n"
++    result = cli(tmp_path, "--extractor-replay", replay, *DATE, "--json", stdin=answers)
++    assert result.returncode == 2
++    document = json.loads(result.stdout)
++    assert (document["rounds"], document["missing_fields"]) == (3, ["budget_per_person"])
++    assert result.stderr.count("Précision ") == 3
++    assert validate_status_document(document) == 2
++
++
++def test_end_of_input_during_clarification_is_exit_2(tmp_path):
++    replay = write(tmp_path, "r.json", [MISSING_BUDGET, E3])
++    result = cli(tmp_path, "--extractor-replay", replay, *DATE, "--json", stdin="Tokyo\n")
++    assert result.returncode == 2
++    assert json.loads(result.stdout)["rounds"] == 0
++
++
++def test_reference_date_changes_admissibility_and_is_shown(tmp_path):
++    path = write(tmp_path, "e3.json", E3)
++    later = cli(tmp_path, "--draft-json", path, "--reference-date", "2027-03-11", "--yes", "--json")
++    assert later.returncode == 0, later.stderr
++    data = json.loads(later.stdout)
++    assert data["provenance"]["reference_date"] == "2027-03-11"
++    northstar = next(o for o in data["offers"] if o["offer_id"] == "tyo-northstar-20270310")
++    assert [v["reason"] for v in northstar["violations"]] == ["offer_departs_before_reference_date"]
++    today = cli(tmp_path, "--draft-json", path, "--yes", "--json")
++    stamp = (
++        json.loads(today.stdout)["provenance"]["reference_date"] if today.returncode == 0 else None
++    )
++    assert today.returncode in (0, 3) and (stamp is None or stamp == date.today().isoformat())
++
++
++# --- exit codes (§6.3) ---------------------------------------------------------------------------
++
++
++@pytest.mark.parametrize(
++    ("draft", "reason"),
++    [
++        (
++            {"destination": "Tokyo", "travellers": 1, "budget_per_person": "0.001"},
++            "budget_below_one_cent",
++        ),
++        (
++            {"destination": "Tokyo", "travellers": 1, "budget_per_person": "2000000000"},
++            "budget_out_of_range",
++        ),
++        (
++            {"destination": "Tokyo", "travellers": 20, "budget_per_person": "600000000"},
++            "budget_total_out_of_range",
++        ),
++    ],
++)
++def test_request_rejected_reasons_reachable_by_draft_json(tmp_path, draft, reason):
++    path = write(tmp_path, "d.json", draft)
++    result = cli(tmp_path, "--draft-json", path, *DATE, "--yes", "--json")
++    document = json.loads(result.stdout)
++    assert result.returncode == validate_status_document(document) == 3
++    assert (document["status"], document["reason"]) == ("request_rejected", reason)
++    assert "Demande non retenue." in result.stderr
++    check_clean(result)
++
++
++def test_invalid_requests_are_exit_3(tmp_path):
++    cases = {
++        "pydantic": ({"destination": "Tokyo", "travellers": "huit"}, ["travellers: int_type"]),
++        "malformed": ("{", ["$: json_invalid"]),
++        "past": (
++            dict(E3, departure_after="2026-01-01"),
++            ["departure_after must not be before the reference date"],
++        ),
++    }
++    for name, (draft, errors) in cases.items():
++        path = write(tmp_path, f"{name}.json", draft)
++        result = cli(tmp_path, "--draft-json", path, *DATE, "--yes", "--json")
++        document = json.loads(result.stdout)
++        assert result.returncode == 3 and document["errors"] == errors, name
++        assert "huit" not in result.stdout + result.stderr
++
++
++def test_needs_clarification_by_draft_json_is_exit_2(tmp_path):
++    path = write(tmp_path, "d.json", MISSING_BUDGET)
++    result = cli(tmp_path, "--draft-json", path, *DATE, "--json")
++    assert result.returncode == 2
++    assert json.loads(result.stdout) == {
++        "missing_fields": ["budget_per_person"],
++        "reference_date": "2026-11-19",
++        "rounds": 0,
++        "schema": "trip-request-status-v1",
++        "source": "draft-json",
++        "status": "needs_clarification",
++    }
++    assert VALIDATION_QUESTION not in result.stderr
++
++
++def test_a_blank_interactive_request_is_exit_3(tmp_path):
++    replay = write(tmp_path, "r1.json", [E3])
++    result = cli(tmp_path, "--extractor-replay", replay, *DATE, "--json", stdin="\n")
++    assert result.returncode == 3
++    assert json.loads(result.stdout)["errors"] == ["request text must not be blank"]
++
++
++@pytest.mark.parametrize(
++    "args",
++    [
++        ["--unknown-option"],
++        ["--prompt", "x", "--draft-json", "d.json"],
++        ["--reference-date", "19/11/2026"],
++        ["--reference-date", "2026-02-30"],
++        ["--draft-json", "absent.json"],
++        ["--draft-json", "d.json", "--extractor-replay", "d.json"],
++        ["--prompt", "voyage"],  # no OLLAMA_MODEL and no replay
++        ["--draft-json"],
++    ],
++)
++def test_incorrect_usage_is_exit_64(tmp_path, args):
++    write(tmp_path, "d.json", E3)
++    result = cli(tmp_path, *args)
++    assert (result.returncode, result.stdout) == (64, "")
++    assert result.stderr.startswith("Usage incorrect : ")
++    assert "Traceback" not in result.stderr
++
++
++def test_technical_errors_are_exit_1(tmp_path):
++    empty = write(tmp_path, "r0.json", [])
++    exhausted = cli(tmp_path, "--prompt", "voyage", "--extractor-replay", empty, *DATE, "--json")
++    assert (exhausted.returncode, exhausted.stdout) == (1, "")
++    assert "ExtractorContractError" in exhausted.stderr
++    unreachable = cli(
++        tmp_path,
++        "--prompt",
++        "voyage",
++        *DATE,
++        env=environment(OLLAMA_MODEL="modele-local", OLLAMA_BASE_URL="http://127.0.0.1:9"),
++    )
++    assert (unreachable.returncode, unreachable.stdout) == (1, "")
++    assert unreachable.stderr.startswith("Erreur technique : ")
++
++
++# --- T-REPLAY (§9.1) -------------------------------------------------------------------------------
++
++
++def test_t_replay_provenance_does_not_depend_on_the_file(tmp_path):
++    other = {"destination": "Tokyo", "travellers": 1, "budget_per_person": "777.77"}
++    r1 = write(tmp_path, "r1.json", [E3])
++    r2 = write(tmp_path, "r2.json", [E3, other])
++    outputs = {}
++    for name, path in (("r1", r1), ("r2", r2)):
++        for mode in ("--json", None):
++            args = ["--prompt", "voyage", "--extractor-replay", path, *DATE, "--yes"]
++            result = cli(tmp_path, *(args + ([mode] if mode else [])))
++            assert result.returncode == 0, result.stderr
++            outputs[(name, mode)] = result
++            digest = hashlib.sha256(path.read_bytes()).hexdigest()
++            for text in (result.stdout, result.stderr):
++                assert digest not in text and str(path) not in text and str(tmp_path) not in text
++    assert outputs[("r1", "--json")].stdout == outputs[("r2", "--json")].stdout
++    assert outputs[("r1", None)].stdout == outputs[("r2", None)].stdout
++    extraction = json.loads(outputs[("r1", "--json")].stdout)["provenance"]["extraction"]
++    assert extraction == {"model": "replay-v1", "provider": "replay", "source": "replay"}
++
++
++def test_t_replay_errors_never_show_the_path_or_the_content(tmp_path):
++    marked = tmp_path / "zq-chemin-prive"
++    marked.mkdir()
++    empty = write(marked, "r0.json", [])
++    result = cli(tmp_path, "--prompt", "voyage", "--extractor-replay", empty, *DATE)
++    assert result.returncode == 1
++    assert "zq-chemin-prive" not in result.stderr and str(tmp_path) not in result.stderr
++    absent = cli(tmp_path, "--draft-json", marked / "absent.json", *DATE)
++    assert absent.returncode == 64
++    assert "Fichier de --draft-json introuvable ou illisible." in absent.stderr
++    assert "zq-chemin-prive" not in absent.stderr
++
++
++def unreadable_cases(marked: Path):
++    cases = [("directory", marked / "dossier.json")]
++    cases[0][1].mkdir()
++    if POSIX and os.geteuid() != 0:
++        locked = write(marked, "verrou.json", [E3])
++        locked.chmod(0)
++        cases.append(("no read permission", locked))
++    return cases
++
++
++def test_t_replay_an_unreadable_file_is_a_usage_error(tmp_path):
++    marked = tmp_path / "zq-chemin-prive"
++    marked.mkdir()
++    cases = unreadable_cases(marked)
++    try:
++        for name, path in cases:
++            result = cli(tmp_path, "--extractor-replay", path, *DATE, stdin="Tokyo\no\n")
++            assert (result.returncode, result.stdout) == (64, ""), name
++            assert "Fichier de --extractor-replay introuvable ou illisible." in result.stderr
++            assert REQUEST_QUESTION not in result.stderr  # before any question
++            for fragment in ("zq-chemin-prive", str(tmp_path), "Permission denied", "Errno"):
++                assert fragment not in result.stderr, (name, fragment)
++    finally:
++        for _, path in cases:
++            if path.is_file():
++                path.chmod(0o600)
++    if not (POSIX and os.geteuid() != 0):
++        pytest.skip("the permission case needs a POSIX system and a non-root user")
++
++
++# --- T-SIGINT (§9.1) -------------------------------------------------------------------------------
++
++
++def interrupt_at(tmp_path, args, marker):
++    process = subprocess.Popen(
++        [sys.executable, "-B", str(SCRIPT), *map(str, args)],
++        stdin=subprocess.PIPE,
++        stdout=subprocess.PIPE,
++        stderr=subprocess.PIPE,
++        cwd=tmp_path,
++        env=environment(),
++    )
++    seen = b""
++    deadline = time.monotonic() + 120
++    while marker.encode("utf-8") not in seen:
++        assert time.monotonic() < deadline, seen.decode("utf-8", "replace")
++        ready, _, _ = select.select([process.stderr], [], [], 1.0)
++        if ready:
++            chunk = os.read(process.stderr.fileno(), 4096)
++            assert chunk, seen.decode("utf-8", "replace")
++            seen += chunk
++    process.send_signal(signal.SIGINT)
++    stdout, stderr = process.communicate(timeout=60)
++    return process.returncode, stdout, (seen + stderr).decode("utf-8")
++
++
++@pytest.mark.skipif(not POSIX, reason="SIGINT is not delivered this way on Windows")
++def test_t_sigint_at_the_validation_question(tmp_path):
++    path = write(tmp_path, "e3.json", E3)
++    code, stdout, stderr = interrupt_at(
++        tmp_path, ["--draft-json", path, *DATE], VALIDATION_QUESTION
++    )
++    assert (code, stdout) == (130, b"")
++    assert "Traceback" not in stderr and "Interruption" in stderr
++
++
++@pytest.mark.skipif(not POSIX, reason="SIGINT is not delivered this way on Windows")
++def test_t_sigint_during_interactive_input(tmp_path):
++    replay = write(tmp_path, "r1.json", [E3])
++    code, stdout, stderr = interrupt_at(
++        tmp_path, ["--extractor-replay", replay, *DATE, "--json"], REQUEST_QUESTION
++    )
++    assert (code, stdout) == (130, b"")
++    assert "Traceback" not in stderr
++
++
++# --- T-LEX on the command (§9.1) -----------------------------------------------------------------
++
++
++@pytest.mark.parametrize(
++    ("draft", "path", "word"),
++    [
++        (dict(E3, destination="Ville Billet"), "destination", "billet"),
++        (
++            dict(E3, profiles=[{"profile_id": "billets", "traveller_count": 8}]),
++            "profiles[0].profile_id",
++            "billets",
++        ),
++        (dict(E3, excluded_suppliers=["Réservé Air"]), "excluded_suppliers[0]", "réservé"),
++    ],
++)
++def test_t_lex_a_forbidden_word_in_a_user_string_is_exit_3(tmp_path, draft, path, word):
++    file = write(tmp_path, "d.json", draft)
++    result = cli(tmp_path, "--draft-json", file, *DATE, "--json")
++    document = json.loads(result.stdout)
++    assert result.returncode == 3
++    assert document["errors"] == [f"forbidden_term: {path}"]
++    assert f"Le champ {path} contient un terme" in result.stderr
++    assert word not in (result.stdout + result.stderr).casefold()
++    assert VALIDATION_QUESTION not in result.stderr
++    check_clean(result)
++
++
++def test_t_lex_a_forbidden_word_from_the_extractor_is_refused_before_any_question(tmp_path):
++    replay = write(tmp_path, "r.json", [{"destination": "Billet Ville", "travellers": 2}])
++    result = cli(tmp_path, "--prompt", "voyage", "--extractor-replay", replay, *DATE)
++    assert result.returncode == 3
++    assert "Précision" not in result.stderr and "billet" not in result.stderr.casefold()
++
++
++# --- I3-A13: nothing is negotiated before the validation (function level) ----------------------
++
++
++class CountingMarket:
++    def __init__(self, market):
++        self.market, self.sessions = market, []
++
++    def __getattr__(self, name):
++        return getattr(self.market, name)
++
++    def open_session(self):
++        session = self.market.open_session()
++        self.sessions.append(session)
++        return session
++
++
++class InterruptingInput(io.StringIO):
++    def readline(self, *args):
++        raise KeyboardInterrupt
++
++
++def run_counting(tmp_path, stdin, *args):
++    path = write(tmp_path, "e3.json", E3)
++    markets = []
++
++    def open_market(catalog, reference_date):
++        markets.append(CountingMarket(open_simulated_market(catalog, reference_date)))
++        return markets[-1]
++
++    stdout, stderr = io.StringIO(), io.StringIO()
++    code = plan_trip.run(
++        ["--draft-json", str(path), *DATE, *args],
++        stdin=stdin,
++        stdout=stdout,
++        stderr=stderr,
++        environ={},
++        open_market=open_market,
++    )
++    return code, markets[0], stdout.getvalue()
++
++
++def test_no_negotiation_before_validation(tmp_path):
++    code, market, stdout = run_counting(tmp_path, io.StringIO("non\n"))
++    assert (code, market.sessions, stdout) == (4, [], "")
++    code, market, stdout = run_counting(tmp_path, InterruptingInput())
++    assert (code, market.sessions, stdout) == (130, [], "")
++    code, market, _ = run_counting(tmp_path, io.StringIO("o\n"))
++    assert code == 0 and len(market.sessions) == 1 and market.sessions[0].oracle_calls > 0
++
++
++def test_the_replay_extractor_reads_its_file_once(tmp_path):
++    path = write(tmp_path, "r.json", [E3, MISSING_BUDGET])
++    extractor = ReplayStructuredRequestExtractor(path)
++    path.unlink()
++    assert extractor.size == 2 and (extractor.provider_name, extractor.model) == (
++        "replay",
++        "replay-v1",
++    )
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/tests/test_presentation.py b/tests/test_presentation.py
+--- a/tests/test_presentation.py	1970-01-01 01:00:00
++++ b/tests/test_presentation.py	2026-11-20 04:07:49
+@@ -0,0 +1,690 @@
++"""I3-B: French messages, text and JSON renderers, vocabulary rule and status documents.
++
++T-CONF-1 to T-CONF-3 are repeated here on the JSON and on the text (scope review §9.1);
++T-LEX covers the renderers (the command is covered in tests/test_plan_trip_cli.py);
++T-STATUS covers the closed schema of trip-request-status-v1, keys and values.
++"""
++
++import json
++import re
++import unicodedata
++from dataclasses import replace
++from datetime import date
++from fractions import Fraction
++from pathlib import Path
++
++import pytest
++from coalition_travel.application.coalition_candidates import FormationLimits
++from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.request_understanding import validate_request_draft
++from coalition_travel.application.trip_planning import (
++    DemandPoolSnapshot,
++    PlanningInput,
++    PlanningRequest,
++    RequestRejection,
++    plan_lot,
++)
++from coalition_travel.application.trip_proposal import (
++    SIMULATION_NOTICE,
++    Explanation,
++    ProjectionActiveParams,
++    contract_field_names,
++)
++from coalition_travel.infrastructure.demand.demand_pool import load_demand_pool
++from coalition_travel.infrastructure.negotiation.market import open_simulated_market
++from coalition_travel.infrastructure.presentation.explanations_fr import (
++    euros,
++    euros_exact,
++    explanation_message,
++    forbidden_term_message,
++    needs_clarification_message,
++    unknown_place_message,
++)
++from coalition_travel.infrastructure.presentation.json_renderer import (
++    PresentationError,
++    StatusDocumentError,
++    canonical_json,
++    error_path,
++    forbidden_term_error,
++    invalid_document,
++    needs_clarification_document,
++    not_validated_document,
++    reduce_validation_error,
++    render_proposal_json,
++    render_status_json,
++    request_rejected_document,
++    validate_status_document,
++)
++from coalition_travel.infrastructure.presentation.text_renderer import (
++    render_proposal_text,
++    render_request_summary,
++    render_status_text,
++)
++from coalition_travel.infrastructure.presentation.vocabulary import (
++    FORBIDDEN_WORDS,
++    contains_forbidden_word,
++    forbidden_user_fields,
++    forbidden_words_in,
++)
++from p4_support import REFERENCE
++from pydantic import ValidationError
++from test_trip_proposal import (
++    E3_DRAFT,
++    EXPECTED_EXCLUSIONS,
++    HEX64,
++    b8_values,
++    b_private_values,
++    draft,
++    marked_pool,
++    other_private_data,
++    plan_for,
++    private_digests,
++    proposal_of,
++    public_source_values,
++    single,
++    variant,
++)
++
++ROOT = Path(__file__).resolve().parents[1]
++CATALOG_PATH = ROOT / "data/catalog/catalog_v1.json"
++POOL_PATH = ROOT / "data/demand/demand_pool_v1.jsonl"
++AMOUNT = re.compile(r"\d{1,3}(?: \d{3})*,\d{2} €")
++PROFILES_CAP = [
++    {"profile_id": "p1", "traveller_count": 1, "budget_per_person": "300"},
++    {"profile_id": "p2", "traveller_count": 3, "budget_per_person": "700"},
++]
++
++
++@pytest.fixture(scope="module")
++def pool():
++    return load_demand_pool(POOL_PATH)
++
++
++@pytest.fixture(scope="module")
++def scenarios(pool):
++    """One real proposal per reachable code, keyed by a short name."""
++    empty = DemandPoolSnapshot(pool.version, pool.sha256, pool.catalog_version, ())
++    built = {
++        "e3": single(E3_DRAFT, pool)[1],
++        "social": single(draft("Tokyo", 2, "500"), pool)[1],
++        "rome": single(draft("Rome", 3, "450"), pool)[1],
++        "singleton": single(draft("Tokyo", 2, "500"), empty)[1],
++        "alger": single(draft("Alger", 2, "500"), pool)[1],
++        "poor": single(draft("Tokyo", 1, "100"), pool)[1],
++        "too_large": single(draft("Tokyo", 1, "520"), pool, FormationLimits(max_component_units=4))[
++            1
++        ],
++        "direct": single(
++            draft("Tokyo", 1, "700", direct_flight="preferred", excluded_suppliers=["Northstar"]),
++            pool,
++        )[1],
++        "cap": single(draft("Tokyo", 4, "600", profiles=PROFILES_CAP), pool)[1],
++    }
++    drafts = {"user": draft("Rome", 20, "400"), "user-2": draft("Rome", 20, "400")}
++    built["h2"] = proposal_of(plan_for(drafts, pool), "user", drafts["user"])
++    return built
++
++
++def explanation(proposal, code):
++    return next(item for item in proposal.explanations if item.code == code)
++
++
++def json_keys(node, found=None):
++    found = set() if found is None else found
++    if isinstance(node, dict):
++        for key, value in node.items():
++            found.add(key)
++            json_keys(value, found)
++    elif isinstance(node, list):
++        for value in node:
++            json_keys(value, found)
++    return found
++
++
++def json_leaves(node, path="$"):
++    if isinstance(node, dict):
++        for key, value in node.items():
++            yield from json_leaves(value, f"{path}.{key}")
++    elif isinstance(node, list):
++        for index, value in enumerate(node):
++            yield from json_leaves(value, f"{path}[{index}]")
++    else:
++        yield path, node
++
++
++def json_numbers(text):
++    """Integers, and the value of every "p/q" string, of a JSON document."""
++    values = set()
++    for _, leaf in json_leaves(json.loads(text)):
++        if isinstance(leaf, bool):
++            continue
++        if isinstance(leaf, int) or (isinstance(leaf, str) and re.fullmatch(r"-?\d+/\d+", leaf)):
++            values.add(Fraction(leaf))
++    return values
++
++
++def text_amounts(text):
++    return set(AMOUNT.findall(text))
++
++
++# --- T-LEX: the vocabulary rule, both faces (§7.2) -------------------------------------------
++
++
++def test_every_forbidden_word_is_refused_in_any_case_and_normal_form():
++    assert len(FORBIDDEN_WORDS) == 13
++    for word in FORBIDDEN_WORDS:
++        for form in (word, word.upper(), word.capitalize()):
++            for normal in ("NFC", "NFD"):
++                text = f"Un mot : {unicodedata.normalize(normal, form)}, dans une phrase."
++                assert contains_forbidden_word(text), (word, form, normal)
++    assert forbidden_words_in("Aucun billet n'est émis.") == ("billet", "émis")
++
++
++def test_words_that_only_contain_a_forbidden_word_pass():
++    notice = render_status_text(
++        not_validated_document(source="draft-json", reference_date=REFERENCE, reason="refused")
++    )
++    for text in (
++        SIMULATION_NOTICE,
++        "réservation",
++        "émission",
++        "confirmation",
++        "billetterie",
++        "RÉSERVATION",
++        notice,
++    ):
++        assert not contains_forbidden_word(text), text
++
++
++def test_the_catalogue_strings_pass_the_vocabulary_rule():
++    def strings(node):
++        if isinstance(node, dict):
++            for key, value in node.items():
++                yield key
++                yield from strings(value)
++        elif isinstance(node, list):
++            for value in node:
++                yield from strings(value)
++        elif isinstance(node, str):
++            yield node
++
++    document = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
++    assert not [text for text in strings(document) if contains_forbidden_word(text)]
++
++
++def test_every_rendered_output_passes_the_vocabulary_rule(scenarios):
++    for name, proposal in scenarios.items():
++        for text in (render_proposal_text(proposal), render_proposal_json(proposal)):
++            assert not forbidden_words_in(text), name
++
++
++def test_user_strings_with_a_forbidden_word_are_located_by_path():
++    item = draft(
++        "Tokyo",
++        2,
++        "500",
++        excluded_suppliers=["Ok Air", "Réservé Air"],
++        profiles=[
++            {"profile_id": "billets", "traveller_count": 1},
++            {"profile_id": "b", "traveller_count": 1, "excluded_suppliers": ["Émis Lines"]},
++        ],
++    )
++    assert forbidden_user_fields(item) == (
++        "excluded_suppliers[1]",
++        "profiles[0].profile_id",
++        "profiles[1].excluded_suppliers[0]",
++    )
++    assert forbidden_user_fields(draft("Billet Ville", 1, "500")) == ("destination",)
++    assert forbidden_user_fields(E3_DRAFT) == ()
++    message = forbidden_term_message("profiles[0].profile_id")
++    assert "profiles[0].profile_id" in message and not contains_forbidden_word(message)
++
++
++def test_a_renderer_refuses_a_text_with_a_forbidden_word(scenarios):
++    proposal = scenarios["e3"]
++    poisoned = replace(proposal, simulation=replace(proposal.simulation, notice="Billet émis."))
++    with pytest.raises(PresentationError):
++        render_proposal_text(poisoned)
++    with pytest.raises(PresentationError):
++        render_proposal_json(poisoned)
++
++
++# --- messages: one test per code (§10.2) -----------------------------------------------------
++
++LOADED_WORDS = re.compile(
++    r"\b(meilleur|meilleure|meilleurs|meilleures|optimal|optimale|avantageux)\b"
++)
++
++
++def check_message(item):
++    message = explanation_message(item)
++    assert message == explanation_message(item)  # deterministic
++    assert message and not contains_forbidden_word(message)
++    return message
++
++
++def test_served_in_coalition_message(scenarios):
++    message = check_message(explanation(scenarios["e3"], "served_in_coalition"))
++    assert "3 autres demandes" in message and "39,00 €" in message
++
++
++def test_alone_no_beneficial_coalition_messages(scenarios):
++    message = check_message(explanation(scenarios["singleton"], "alone_no_beneficial_coalition"))
++    assert "aucune coalition n'a été évaluée" in message
++    assert "toutes les coalitions possibles" not in message
++    params = explanation(scenarios["singleton"], "alone_no_beneficial_coalition").params
++    counted = Explanation(
++        "alone_no_beneficial_coalition",
++        "status",
++        replace(
++            params,
++            component_units=3,
++            singleton_component=False,
++            evaluated=3,
++            without_agreement=1,
++            without_saving=2,
++        ),
++    )
++    message = check_message(counted)
++    assert "3 coalitions évaluées par P4" in message
++    assert "1 n'ont abouti à aucun accord et 2 n'ont dégagé aucune économie" in message
++
++
++def test_alone_social_optimum_message_never_says_alone_is_better(scenarios):
++    for name in ("social", "rome"):
++        message = check_message(explanation(scenarios[name], "alone_social_optimum"))
++        assert not LOADED_WORDS.search(message.casefold())
++        assert "maximise la valeur totale du groupe" in message
++        assert "ne signifie pas qu'une coalition aurait été défavorable" in message
++    social = check_message(explanation(scenarios["social"], "alone_social_optimum"))
++    assert "même valeur totale" in social and "règle de départage" in social
++    assert "écart 18,00 €" in social
++
++
++def test_unallocated_status_messages(scenarios):
++    assert "3 offres ont été écartées" in check_message(
++        explanation(scenarios["alger"], "no_admissible_offer")
++    )
++    assert "2 négociations sans accord" in check_message(
++        explanation(scenarios["poor"], "no_solo_reference")
++    )
++    assert "5 demandes" in check_message(explanation(scenarios["too_large"], "component_too_large"))
++    assert "rom-cloudwing-20270405" in check_message(
++        explanation(scenarios["h2"], "capacity_model_violated")
++    )
++
++
++def test_modifier_messages(scenarios):
++    assert "p1" in check_message(explanation(scenarios["cap"], "budget_cap_active"))
++    forced = Explanation(
++        "projection_active", "modifier", ProjectionActiveParams(True, Fraction(-201, 2))
++    )
++    message = check_message(forced)
++    assert "valeur exacte : -201/2 centimes" in message and "atteint une borne" in message
++
++
++def test_offer_messages(scenarios):
++    rejected = check_message(explanation(scenarios["e3"], "offer_rejected"))
++    assert rejected.startswith("Offre rom-cloudwing-20270405 écartée : la destination")
++    direct = check_message(explanation(scenarios["direct"], "direct_preference_not_met"))
++    assert "tyo-skyways-20270312" in direct and "Aucune offre directe admissible" in direct
++
++
++def test_request_level_messages():
++    message = needs_clarification_message(("destination", "budget_per_person"))
++    assert message == (
++        "Il manque des informations pour traiter la demande : la destination, "
++        "le budget par personne."
++    )
++    assert not contains_forbidden_word(unknown_place_message())
++
++
++def test_amount_formatting():
++    assert euros(380_100) == "3 801,00 €"
++    assert euros(5) == "0,05 €" and euros(-100) == "-1,00 €"
++    assert euros(100_000_000_000) == "1 000 000 000,00 €"
++    assert euros_exact(Fraction(3_900)) == "39,00 €"
++    assert euros_exact(Fraction(1, 3)) == "≈ 0,00 € (valeur exacte : 1/3 centimes)"
++    with pytest.raises(TypeError):
++        euros(1.5)
++
++
++# --- JSON renderer (§7.1, §9.2) ---------------------------------------------------------------
++
++
++def test_json_is_canonical_and_identical_byte_for_byte(pool, scenarios):
++    text = render_proposal_json(scenarios["e3"])
++    assert text.endswith("}\n")
++    data = json.loads(text)
++    assert canonical_json(data) == text
++    assert json.dumps(data, sort_keys=True, ensure_ascii=False, indent=2) + "\n" == text
++    assert "é" in text and "\\u00e9" not in text  # ensure_ascii=False
++    again = single(E3_DRAFT, pool)[1]
++    assert render_proposal_json(again) == text
++
++
++def test_json_types_and_units(scenarios):
++    data = json.loads(render_proposal_json(scenarios["e3"]))
++    assert data["schema"] == "trip-proposal-v1"
++    assert data["simulation"] == {
++        "booking": False,
++        "notice": scenarios["e3"].simulation.notice,
++        "simulated_sellers": True,
++        "synthetic_catalog": True,
++    }
++    assert data["allocation"]["phi_cents"] == "3900/1"
++    assert data["allocation"]["payment_cents"] == 380_100
++    assert data["provenance"]["reference_date"] == "2026-11-19"
++    assert data["offers"][1]["departure_date"] == "2027-03-10"
++    assert data["request"]["draft"]["budget_per_person"] == "500"
++    for item in data["explanations"]:
++        assert set(item) == {"code", "level", "params", "message"}
++    assert data["block"]["negotiation"]["leader_initial_total_cents"] is None
++
++
++def test_json_renderer_accepts_a_proposal_only(scenarios):
++    with pytest.raises(TypeError):
++        render_proposal_json(scenarios["e3"].block)
++    with pytest.raises(TypeError):
++        render_proposal_text(json.loads(render_proposal_json(scenarios["e3"])))
++
++
++def test_t_conf_3_json_keys_are_closed(scenarios):
++    draft_keys = set(TravelRequestDraft.model_fields) | {
++        "profile_id",
++        "traveller_count",
++    }
++    allowed = set(contract_field_names()) | {"message"} | draft_keys
++    for name, proposal in scenarios.items():
++        data = json.loads(render_proposal_json(proposal))
++        keys = json_keys(data)
++        assert keys <= allowed, (name, keys - allowed)
++        forbidden = ("floor", "seller_terms", "request_key", "sha256", "run_id", "configuration")
++        assert not [k for k in keys if any(fragment in k for fragment in forbidden)]
++        budget_keys = {k for k in keys if "budget" in k}
++        # the person's own fields, and the keys of the person's validated draft (§4.3)
++        assert budget_keys <= {"budget_total_cents", "budget_cents", "budget_per_person"}
++
++
++# --- text renderer (§9.1) --------------------------------------------------------------------
++
++
++def test_text_shows_the_nine_elements_and_the_notice(scenarios):
++    text = render_proposal_text(scenarios["e3"])
++    assert text.startswith(scenarios["e3"].simulation.notice + "\nDate de référence : 2026-11-19\n")
++    for fragment in (
++        "== Offres du catalogue ==",  # (1)
++        "- autre demande 3 : 1 place(s), paiement 510,00 €",  # (2)
++        "== Négociations individuelles (simulation) ==",  # (3)
++        "Offre commune : tyo-northstar-20270310",  # (4)
++        "Prix catalogue : 5 280,00 €",  # (5)
++        "Prix négocié (simulation) : 5 280,00 €",
++        "Valeur créée (économie collective) : 90,00 €",  # (6)
++        "Contribution à la valeur créée (Shapley) : 39,00 €",
++        "Paiement de votre demande : 3 801,00 €",
++        "- profil all, place 1 : 475,13 € (budget 500,00 €)",  # (7)
++        "écartée : la destination de l'offre ne correspond pas à la demande",  # (8)
++        "== Provenance ==",
++    ):
++        assert fragment in text, fragment
++    assert "montant non publié" in text
++    social = render_proposal_text(scenarios["social"])
++    assert "Statut : demande traitée seule" in social and "même valeur totale" in social  # (9)
++
++
++def test_text_is_identical_byte_for_byte(pool, scenarios):
++    again = single(E3_DRAFT, pool)[1]
++    assert render_proposal_text(again) == render_proposal_text(scenarios["e3"])
++
++
++def test_request_summary_uses_validated_fields_only():
++    summary = render_request_summary(draft("Tokyo", 4, "600", profiles=PROFILES_CAP))
++    assert summary.startswith("Demande comprise :\n- destination : Tokyo\n")
++    assert "- profil p1 : 1 voyageur(s), budget 300,00 €" in summary
++    assert "ville de départ : non prise en compte dans cette version" in summary
++    assert "budget par personne : 0,001 €" in render_request_summary(draft("Tokyo", 1, "0.001"))
++
++
++# --- T-CONF on the JSON and the text (§9.1) ---------------------------------------------------
++
++
++@pytest.fixture(scope="module")
++def conf(pool):
++    plans = {
++        name: plan_for({"user": E3_DRAFT}, variant(pool, budget))
++        for name, budget in (("A", "520.00"), ("B", "521.37"))
++    }
++    proposals = {name: proposal_of(plan, "user", E3_DRAFT) for name, plan in plans.items()}
++    outputs = {
++        name: (render_proposal_json(p), render_proposal_text(p)) for name, p in proposals.items()
++    }
++    return plans, outputs
++
++
++def test_t_conf_1_json_and_text_identical_byte_for_byte(conf):
++    _, outputs = conf
++    assert outputs["A"] == outputs["B"]
++
++
++def test_t_conf_2b_no_digest_in_json_or_text(conf):
++    plans, outputs = conf
++    for name in ("A", "B"):
++        for text in outputs[name]:
++            assert not HEX64.search(text)
++            assert not [d for d in private_digests(plans[name]) if d in text]
++
++
++def test_t_conf_2c_no_private_value_of_b_in_json_or_text(conf):
++    plans, outputs = conf
++    private = b_private_values(plans["B"])
++    json_text, text = outputs["B"]
++    assert not {Fraction(v) for v in private.values()} & json_numbers(json_text)
++    assert not {euros(v) for v in private.values()} & text_amounts(text)
++
++
++def test_t_conf_2d_seller_messages_in_json(conf):
++    _, outputs = conf
++    messages = json.loads(outputs["B"][0])["block"]["negotiation"]["messages"]
++    assert [m["total_cents"] for m in messages if m["actor"] == "seller"] == [528_000]
++
++
++def test_t_conf_2e_no_value_of_the_other_members_in_json_or_text(pool):
++    snapshot = marked_pool(pool)
++    plan = plan_for({"user": E3_DRAFT}, snapshot)
++    proposal = proposal_of(plan, "user", E3_DRAFT)
++    json_text, text = render_proposal_json(proposal), render_proposal_text(proposal)
++    public, b8 = public_source_values(plan), b8_values(plan)
++    exclusions, leaks = set(), []
++    numbers, amounts = json_numbers(json_text), text_amounts(text)
++    folded = (json_text.casefold(), text.casefold())
++    for (rid, kind), value in other_private_data(snapshot, plan).items():
++        if isinstance(value, int | Fraction):
++            exact = Fraction(value)
++            if exact == 0:
++                exclusions.add((rid, kind, 3))
++            elif exact in b8.get(rid, set()):
++                exclusions.add((rid, kind, 1))
++            elif exact in public:
++                exclusions.add((rid, kind, 2))
++            elif exact in numbers or (exact.denominator == 1 and euros(exact.numerator) in amounts):
++                leaks.append((rid, kind))
++        else:
++            needle = value.isoformat() if isinstance(value, date) else value
++            if any(needle.casefold() in haystack for haystack in folded):
++                leaks.append((rid, kind))
++    assert exclusions == EXPECTED_EXCLUSIONS
++    assert not leaks
++
++
++# --- T-STATUS: closed status documents, keys and values (§6.4) -------------------------------
++
++
++def rejection_of(item):
++    market = open_simulated_market(CATALOG_PATH, REFERENCE)
++    plan = plan_lot(PlanningInput((PlanningRequest("user", item),), None, REFERENCE), market)
++    assert plan.status == "request_rejected"
++    return plan.rejections[0]
++
++
++def test_status_documents_positive_cases():
++    common = {"source": "draft-json", "reference_date": REFERENCE}
++    cases = [
++        (needs_clarification_document(missing_fields=["budget_per_person"], rounds=0, **common), 2),
++        (
++            needs_clarification_document(
++                source="replay",
++                reference_date=REFERENCE,
++                missing_fields=["destination", "budget_per_person"],
++                rounds=3,
++            ),
++            2,
++        ),
++        (
++            invalid_document(
++                errors=["departure_after must not be before the reference date"], **common
++            ),
++            3,
++        ),
++        (
++            invalid_document(
++                errors=["profile groupe 1: arrival_before is before reference date"], **common
++            ),
++            3,
++        ),
++        (invalid_document(errors=["request text must not be blank"], **common), 3),
++        (invalid_document(errors=["request text exceeds 12000 characters"], **common), 3),
++        (
++            invalid_document(
++                errors=["$: json_invalid", "profiles[0].?: extra_forbidden"], **common
++            ),
++            3,
++        ),
++        (
++            invalid_document(
++                errors=[forbidden_term_error("profiles[1].excluded_suppliers[0]")], **common
++            ),
++            3,
++        ),
++        (not_validated_document(reason="refused", **common), 4),
++        (not_validated_document(reason="empty_answer", **common), 4),
++        (not_validated_document(reason="end_of_input", **common), 4),
++    ]
++    for document, code in cases:
++        assert validate_status_document(document) == code, document
++        text, rendered_code = render_status_json(document)
++        assert rendered_code == code and json.loads(text) == document
++        assert canonical_json(document) == text
++
++
++def test_request_rejected_rows_from_the_real_planner():
++    """The five rows of §6.4: three budget reasons, two request_not_ready rows."""
++    rows = {
++        "below": (draft("Tokyo", 1, "0.001"), "budget_below_one_cent", 3),
++        "per_person": (draft("Tokyo", 1, "2000000000"), "budget_out_of_range", 3),
++        "total": (draft("Tokyo", 20, "600000000"), "budget_total_out_of_range", 3),
++        "missing": (TravelRequestDraft(destination="Tokyo", travellers=2), "request_not_ready", 2),
++        "past": (draft("Tokyo", 2, "500", departure_after="2026-01-01"), "request_not_ready", 3),
++    }
++    for item, reason, code in rows.values():
++        if reason.startswith("budget"):
++            assert validate_request_draft(item, REFERENCE).status == "ready"
++        rejection = rejection_of(item)
++        document = request_rejected_document(
++            source="draft-json", reference_date=REFERENCE, rejection=rejection
++        )
++        assert document["reason"] == reason
++        assert validate_status_document(document) == code
++        message = render_status_text(document)
++        assert not contains_forbidden_word(message)
++
++
++def test_status_documents_negative_cases():
++    base = request_rejected_document(
++        source="draft-json",
++        reference_date=REFERENCE,
++        rejection=RequestRejection("user", "budget_out_of_range", None, (), ()),
++    )
++    assert validate_status_document(base) == 3
++    refused = [
++        base | {"reason": "invalid_request_id"},
++        base | {"reason": "unknown_reason"},
++        base | {"missing_fields": ["destination"]},
++        base | {"errors": ["departure_after must not be before the reference date"]},
++        base | {"rejection_status": "invalid"},
++        base | {"reason": "request_not_ready", "rejection_status": "other"},
++        base | {"extra": 1},
++        {key: value for key, value in base.items() if key != "errors"},
++        base | {"errors": None},
++        base | {"schema": "trip-request-status-v2"},
++        base | {"source": "file"},
++        base | {"reference_date": "19/11/2026"},
++        invalid_document(source="llm", reference_date=REFERENCE, errors=["something went wrong"]),
++        invalid_document(source="llm", reference_date=REFERENCE, errors=["travellers: 'x' is bad"]),
++        invalid_document(source="llm", reference_date=REFERENCE, errors=["destinationz: missing"]),
++        invalid_document(source="llm", reference_date=REFERENCE, errors=[]),
++        needs_clarification_document(
++            source="llm", reference_date=REFERENCE, missing_fields=["origin"], rounds=1
++        ),
++        needs_clarification_document(
++            source="llm",
++            reference_date=REFERENCE,
++            missing_fields=["budget_per_person", "destination"],
++            rounds=1,
++        ),
++        needs_clarification_document(
++            source="llm", reference_date=REFERENCE, missing_fields=["destination"], rounds=4
++        ),
++        needs_clarification_document(
++            source="draft-json", reference_date=REFERENCE, missing_fields=["destination"], rounds=1
++        ),
++        not_validated_document(source="llm", reference_date=REFERENCE, reason="timeout"),
++    ]
++    for document in refused:
++        with pytest.raises(StatusDocumentError):
++            validate_status_document(document)
++        with pytest.raises(StatusDocumentError):
++            render_status_json(document)
++
++
++def test_pydantic_errors_are_reduced_without_the_received_values():
++    payload = (
++        '{"destination": "Tokyo", "travellers": "huit", "secret_key": "valeur privée", '
++        '"profiles": [{"profile_id": "a", "traveller_count": 1, "other": 2}]}'
++    )
++    with pytest.raises(ValidationError) as caught:
++        TravelRequestDraft.model_validate_json(payload)
++    lines = reduce_validation_error(caught.value)
++    assert set(lines) == {
++        "travellers: int_type",
++        "?: extra_forbidden",
++        "profiles[0].?: extra_forbidden",
++    }
++    assert not [line for line in lines if "huit" in line or "secret" in line or "privée" in line]
++    with pytest.raises(ValidationError) as malformed:
++        TravelRequestDraft.model_validate_json("{")
++    assert reduce_validation_error(malformed.value) == ("$: json_invalid",)
++    assert error_path(()) == "$" and error_path(("profiles", 2, "budget_per_person")) == (
++        "profiles[2].budget_per_person"
++    )
++    document = invalid_document(source="draft-json", reference_date=REFERENCE, errors=lines)
++    assert validate_status_document(document) == 3
++
++
++def test_status_text_names_the_field_without_quoting_the_value():
++    document = invalid_document(
++        source="draft-json",
++        reference_date=REFERENCE,
++        errors=[forbidden_term_error("profiles[0].profile_id")],
++    )
++    text = render_status_text(document)
++    assert "Le champ profiles[0].profile_id contient un terme" in text
++    assert not contains_forbidden_word(text)
++    clarification = render_status_text(
++        needs_clarification_document(
++            source="replay", reference_date=REFERENCE, missing_fields=["travellers"], rounds=3
++        )
++    )
++    assert "le nombre de voyageurs" in clarification
++    assert "aucune simulation" in render_status_text(
++        not_validated_document(source="llm", reference_date=REFERENCE, reason="end_of_input")
++    )
+diff -ruN -x __pycache__ -x *.egg-info -x .DS_Store a/tests/test_trip_proposal.py b/tests/test_trip_proposal.py
+--- a/tests/test_trip_proposal.py	2026-11-20 04:19:04
++++ b/tests/test_trip_proposal.py	2026-11-20 04:02:27
+@@ -508,6 +508,27 @@
+         replace(proposal, schema="trip-proposal-v2")
+ 
+ 
++def test_duplicate_modifiers_and_annotations_are_refused(pool, e3):
++    """Hardening requested by the I3-A review: a hand-built DTO cannot repeat a code."""
++    profiles = [
++        {"profile_id": "p1", "traveller_count": 1, "budget_per_person": "300"},
++        {"profile_id": "p2", "traveller_count": 3, "budget_per_person": "700"},
++    ]
++    _, capped = single(draft("Tokyo", 4, "600", profiles=profiles), pool)
++    modifier = next(e for e in capped.explanations if e.level == "modifier")
++    explanations = tuple(sorted(capped.explanations + (modifier,), key=Explanation.sort_key))
++    with pytest.raises(ProposalConsistencyError, match="distinct codes"):
++        replace(
++            capped,
++            status=replace(capped.status, modifiers=(modifier.code, modifier.code)),
++            explanations=explanations,
++        )
++    _, proposal = e3
++    rejected = next(e for e in proposal.explanations if e.code == "offer_rejected")
++    with pytest.raises(ProposalConsistencyError, match="appears twice"):
++        replace(proposal, explanations=proposal.explanations + (rejected,))
++
++
+ def test_the_builder_refuses_inputs_outside_its_contract(pool, e3):
+     plan, _ = e3
+     with pytest.raises(ProposalConsistencyError, match="not a focus request"):
+diff -u a/pyproject.toml b/pyproject.toml
+--- a/pyproject.toml	2026-11-20 04:18:21
++++ b/pyproject.toml	2026-11-20 04:09:44
+@@ -20,6 +20,7 @@
+ coalition-travel = "Entry:run_scenarios"
+ coalition-travel-eval = "evaluate_requests:main"
+ coalition-travel-eval-rag = "evaluate_retrieval:main"
++coalition-travel-plan = "plan_trip:main"
+ 
+ [tool.setuptools]
+ package-dir = {"" = "Multi-Agent"}
+@@ -34,6 +35,7 @@
+     "Leader",
+     "Message",
+     "Negotiation",
++    "plan_trip",
+     "SellerAgent",
+ ]
+ 

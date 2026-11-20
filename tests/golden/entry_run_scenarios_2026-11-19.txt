@@ -1,0 +1,381 @@
+DÉBUT — NÉGOCIATION MULTI-AGENT
+
+SCÉNARIO 1 — Négociation bilatérale
+
+AirFrance reçoit: [CFP] Alice -> AirFrance: {'destination': 'Paris'}
+AirFrance (Raisonnement): Un client cherche un billet. Je propose 560.00€.
+
+Alice reçoit: [PROPOSE] AirFrance -> Alice: {'price': 560.0}
+Alice (Raisonnement): Prix trop haut. Soumission 1/6. Risque Zeuthen = 0.37 → concession +4.1% (plafond deadline 6.5%, ~13j).
+
+AirFrance reçoit: [PROPOSE] Alice -> AirFrance: {'price': 312.3137142857143}
+AirFrance (Raisonnement): L'offre est trop basse. Je fais une contre-proposition à 504.00€.
+
+Alice reçoit: [PROPOSE] AirFrance -> Alice: {'price': 504.0}
+Alice (Raisonnement): Prix trop haut. Soumission 2/6. Risque Zeuthen = 0.28 → concession +4.7% (plafond deadline 6.5%, ~13j).
+
+AirFrance reçoit: [PROPOSE] Alice -> AirFrance: {'price': 327.0231343212621}
+AirFrance (Raisonnement): L'offre est trop basse. Je fais une contre-proposition à 453.60€.
+
+Alice reçoit: [PROPOSE] AirFrance -> Alice: {'price': 453.6}
+Alice (Raisonnement): Le prix 453.60€ est dans mon budget (500€). J'ACCEPTE.
+  Accord : 453.60€ en 6 tours.
+
+SCÉNARIO 2 — Coalition par le broker
+[TravelBroker] NOUVELLE INSCRIPTION : Bob veut aller à Tokyo. (Total en attente: 1)
+[TravelBroker] NOUVELLE INSCRIPTION : Carol veut aller à Tokyo. (Total en attente: 2)
+[TravelBroker] NOUVELLE INSCRIPTION : Dave veut aller à Tokyo. (Total en attente: 3)
+
+[TravelBroker] COALITION FORMÉE (3 membres) pour Tokyo !
+
+Bob reçoit: [INFORM] TravelBroker -> Bob: Coalition formée avec 10.0% de réduction!
+
+Carol reçoit: [INFORM] TravelBroker -> Carol: Coalition formée avec 10.0% de réduction!
+
+Dave reçoit: [INFORM] TravelBroker -> Dave: Coalition formée avec 10.0% de réduction!
+
+  ÉTAPE 2 — Broker crée CoalitionLeaderAgent 'Coalition_Tokyo_(3_membres)' et délègue la négociation.
+
+  ÉTAPE 3 — CoalitionLeaderAgent négocie directement avec le vendeur.
+
+--- DÉBUT DE LA NÉGOCIATION DE GROUPE ---
+[Coalition_Tokyo_(3_membres)] Je représente 3 voyageurs.
+[Coalition_Tokyo_(3_membres)] Budget cumulé : 1670€.
+[Coalition_Tokyo_(3_membres)] Réduction garantie par la coalition : 10%.
+[Coalition_Tokyo_(3_membres)] Négociation avec GroupSeller (plancher total : 1080.00€, budget total : 1670.00€).
+
+GroupSeller reçoit: [CFP] Coalition_Tokyo_(3_membres) -> GroupSeller: {'destination': 'groupe'}
+GroupSeller (Raisonnement): Un client cherche un billet. Je propose 1512.00€.
+[Coalition_Tokyo_(3_membres)] Prix 1512.00€ acceptable. J'ACCEPTE pour le groupe.
+
+[Coalition_Tokyo_(3_membres)] ACCORD OBTENU à 1512.00€ (504.00€/billet en moyenne).
+  → Bob paie 504.00€ (budget : 550.00€, reste : 46.00€)
+  → Carol paie 504.00€ (budget : 600.00€, reste : 96.00€)
+  → Dave paie 504.00€ (budget : 520.00€, reste : 16.00€)
+
+  ┌─ Avantage réel de la coalition :
+  │  Plancher sans remise : 1200.00€ au total
+  │  Plancher avec remise : 1080.00€ au total
+  │  Économie plancher    : 120.00€ au total
+  └───────────────────────────────────────────────────────
+-----------------------------------------
+
+[TravelBroker4] NOUVELLE INSCRIPTION : Lina veut aller à Rome. (Total en attente: 1)
+[TravelBroker4] NOUVELLE INSCRIPTION : Marc veut aller à Rome. (Total en attente: 2)
+[TravelBroker4] NOUVELLE INSCRIPTION : Nora veut aller à Rome. (Total en attente: 3)
+[TravelBroker4] NOUVELLE INSCRIPTION : Omar veut aller à Rome. (Total en attente: 4)
+
+[TravelBroker4] COALITION FORMÉE (4 membres) pour Rome !
+
+Lina reçoit: [INFORM] TravelBroker4 -> Lina: Coalition formée avec 20.0% de réduction!
+
+Marc reçoit: [INFORM] TravelBroker4 -> Marc: Coalition formée avec 20.0% de réduction!
+
+Nora reçoit: [INFORM] TravelBroker4 -> Nora: Coalition formée avec 20.0% de réduction!
+
+Omar reçoit: [INFORM] TravelBroker4 -> Omar: Coalition formée avec 20.0% de réduction!
+
+  ÉTAPE 2 — Broker crée CoalitionLeaderAgent 'Coalition_Rome_(4_membres)' et délègue la négociation.
+
+  ÉTAPE 3 — CoalitionLeaderAgent négocie directement avec le vendeur.
+
+--- DÉBUT DE LA NÉGOCIATION DE GROUPE ---
+[Coalition_Rome_(4_membres)] Je représente 4 voyageurs.
+[Coalition_Rome_(4_membres)] Budget cumulé : 2280€.
+[Coalition_Rome_(4_membres)] Réduction garantie par la coalition : 20%.
+[Coalition_Rome_(4_membres)] Négociation avec GroupSeller (plancher total : 1280.00€, budget total : 2280.00€).
+
+GroupSeller reçoit: [CFP] Coalition_Rome_(4_membres) -> GroupSeller: {'destination': 'groupe'}
+GroupSeller (Raisonnement): Un client cherche un billet. Je propose 1792.00€.
+[Coalition_Rome_(4_membres)] Prix 1792.00€ acceptable. J'ACCEPTE pour le groupe.
+
+[Coalition_Rome_(4_membres)] ACCORD OBTENU à 1792.00€ (448.00€/billet en moyenne).
+  → Lina paie 448.00€ (budget : 540.00€, reste : 92.00€)
+  → Marc paie 448.00€ (budget : 560.00€, reste : 112.00€)
+  → Nora paie 448.00€ (budget : 580.00€, reste : 132.00€)
+  → Omar paie 448.00€ (budget : 600.00€, reste : 152.00€)
+
+  ┌─ Avantage réel de la coalition :
+  │  Plancher sans remise : 1600.00€ au total
+  │  Plancher avec remise : 1280.00€ au total
+  │  Économie plancher    : 320.00€ au total
+  └───────────────────────────────────────────────────────
+-----------------------------------------
+
+
+SCÉNARIO 3 — Préférence blacklist
+
+Eve reçoit: [PROPOSE] AirFrance -> Eve: {'price': 350.0}
+Eve (Préférences): AirFrance est dans ma liste de refus. Je REJETTE sans négocier, même si le prix 350.00€ est attractif.
+  [REJECT] Eve -> AirFrance: {'reason': 'AirFrance blacklisted'}
+
+SCÉNARIO 4 — Pression temporelle, dates relatives
+  Taux plafond Frank : 8.7%
+  Taux plafond Grace : 2.0%
+
+AirFrance reçoit: [CFP] Frank -> AirFrance: {'destination': 'Londres'}
+AirFrance (Raisonnement): Un client cherche un billet. Je propose 560.00€.
+
+Frank reçoit: [PROPOSE] AirFrance -> Frank: {'price': 560.0}
+Frank (Raisonnement): Prix trop haut. Soumission 1/6. Risque Zeuthen = 0.46 → concession +4.7% (plafond deadline 8.7%, ~5j).
+
+AirFrance reçoit: [PROPOSE] Frank -> AirFrance: {'price': 282.63342857142857}
+AirFrance (Raisonnement): L'offre est trop basse. Je fais une contre-proposition à 504.00€.
+
+Frank reçoit: [PROPOSE] AirFrance -> Frank: {'price': 504.0}
+Frank (Raisonnement): Prix trop haut. Soumission 2/6. Risque Zeuthen = 0.36 → concession +5.6% (plafond deadline 8.7%, ~5j).
+
+AirFrance reçoit: [PROPOSE] Frank -> AirFrance: {'price': 298.3513350453318}
+AirFrance (Raisonnement): L'offre est trop basse. Je fais une contre-proposition à 453.60€.
+
+Frank reçoit: [PROPOSE] AirFrance -> Frank: {'price': 453.6}
+Frank (Raisonnement): Prix trop haut. Soumission 3/6. Risque Zeuthen = 0.26 → concession +6.4% (plafond deadline 8.7%, ~5j).
+
+AirFrance reçoit: [PROPOSE] Frank -> AirFrance: {'price': 317.5436919650788}
+AirFrance (Raisonnement): L'offre est trop basse. Je fais une contre-proposition à 408.24€.
+
+Frank reçoit: [PROPOSE] AirFrance -> Frank: {'price': 408.24}
+Frank (Raisonnement): Le prix 408.24€ est dans mon budget (450€). J'ACCEPTE.
+  Accord : 408.24€ en 8 tours.
+
+AirFrance reçoit: [CFP] Grace -> AirFrance: {'destination': 'Londres'}
+AirFrance (Raisonnement): Un client cherche un billet. Je propose 560.00€.
+
+Grace reçoit: [PROPOSE] AirFrance -> Grace: {'price': 560.0}
+Grace (Raisonnement): Prix trop haut. Soumission 1/6. Risque Zeuthen = 0.46 → concession +1.1% (plafond deadline 2.0%, ~180j).
+
+AirFrance reçoit: [PROPOSE] Grace -> AirFrance: {'price': 272.9142857142857}
+AirFrance (Raisonnement): L'offre est trop basse. Je fais une contre-proposition à 504.00€.
+
+Grace reçoit: [PROPOSE] AirFrance -> Grace: {'price': 504.0}
+Grace (Raisonnement): Prix trop haut. Soumission 2/6. Risque Zeuthen = 0.37 → concession +1.3% (plafond deadline 2.0%, ~180j).
+
+AirFrance reçoit: [PROPOSE] Grace -> AirFrance: {'price': 276.3611528547996}
+AirFrance (Raisonnement): L'offre est trop basse. Je fais une contre-proposition à 453.60€.
+
+Grace reçoit: [PROPOSE] AirFrance -> Grace: {'price': 453.6}
+Grace (Raisonnement): Prix trop haut. Soumission 3/6. Risque Zeuthen = 0.28 → concession +1.4% (plafond deadline 2.0%, ~180j).
+
+AirFrance reçoit: [PROPOSE] Grace -> AirFrance: {'price': 280.31753303217687}
+AirFrance (Raisonnement): L'offre est trop basse. Je fais une contre-proposition à 408.24€.
+
+Grace reçoit: [PROPOSE] AirFrance -> Grace: {'price': 408.24}
+Grace (Raisonnement): Le prix 408.24€ est dans mon budget (450€). J'ACCEPTE.
+  Accord : 408.24€ en 8 tours.
+
+SCÉNARIO 5 — Optimisation DP / IDP / IP
+  Valeurs des coalitions :
+    {'Alice'} : 0.00€
+    {'Bob'} : 0.00€
+    {'Carol'} : 0.00€
+    {'Dave'} : 0.00€
+    {'Eve'} : 0.00€
+    {'Alice', 'Bob'} : 55.00€
+    {'Alice', 'Carol'} : 52.50€
+    {'Alice', 'Dave'} : 49.00€
+    {'Alice', 'Eve'} : 51.50€
+    {'Bob', 'Carol'} : 57.50€
+    {'Bob', 'Dave'} : 54.00€
+    {'Bob', 'Eve'} : 56.50€
+    {'Dave', 'Carol'} : 51.50€
+    {'Eve', 'Carol'} : 54.00€
+    {'Dave', 'Eve'} : 50.50€
+    {'Alice', 'Bob', 'Carol'} : 198.00€
+    {'Dave', 'Alice', 'Bob'} : 189.60€
+    {'Alice', 'Bob', 'Eve'} : 195.60€
+    {'Alice', 'Dave', 'Carol'} : 183.60€
+    {'Eve', 'Alice', 'Carol'} : 189.60€
+    {'Alice', 'Dave', 'Eve'} : 181.20€
+    {'Bob', 'Dave', 'Carol'} : 195.60€
+    {'Eve', 'Bob', 'Carol'} : 201.60€
+    {'Bob', 'Dave', 'Eve'} : 193.20€
+    {'Eve', 'Dave', 'Carol'} : 187.20€
+    {'Dave', 'Alice', 'Bob', 'Carol'} : 170.40€
+    {'Eve', 'Alice', 'Bob', 'Carol'} : 174.40€
+    {'Dave', 'Alice', 'Bob', 'Eve'} : 168.80€
+    {'Eve', 'Alice', 'Dave', 'Carol'} : 164.80€
+    {'Eve', 'Bob', 'Dave', 'Carol'} : 172.80€
+    {'Carol', 'Dave', 'Alice', 'Bob', 'Eve'} : 159.60€
+
+  ┌─ DP
+  │  SC*           = { {Alice, Dave}  |  {Bob, Carol, Eve} }
+  │  V(SC*)        = 250.60
+  │  coalitions évaluées = 31
+  └──────────────────────────────────────────────────────────
+
+  ┌─ IDP
+  │  SC*           = { {Alice, Dave}  |  {Bob, Carol, Eve} }
+  │  V(SC*)        = 250.60
+  │  coalitions évaluées = 31
+  │  paires élaguées = 37
+  └──────────────────────────────────────────────────────────
+
+  ┌─ IP
+  │  SC*           = { {Alice, Dave}  |  {Bob, Carol, Eve} }
+  │  V(SC*)        = 250.60
+  │  variables ILP  = 31
+  └──────────────────────────────────────────────────────────
+
+  ┌─ Oracle exhaustif
+  │  SC*           = { {Alice, Dave}  |  {Bob, Carol, Eve} }
+  │  V(SC*)        = 250.60
+  │  partitions parcourues = 52
+  └──────────────────────────────────────────────────────────
+  Grand coalition seule : 159.60€
+
+SCÉNARIO 6 — Broker glouton réel comparé à l’optimum IDP
+[Broker_Tokyo-A] NOUVELLE INSCRIPTION : Alice veut aller à Tokyo-A. (Total en attente: 1)
+[Broker_Tokyo-A] NOUVELLE INSCRIPTION : Bob veut aller à Tokyo-A. (Total en attente: 2)
+[Broker_Tokyo-A] NOUVELLE INSCRIPTION : Carol veut aller à Tokyo-A. (Total en attente: 3)
+
+[Broker_Tokyo-A] COALITION FORMÉE (3 membres) pour Tokyo-A !
+
+Alice reçoit: [INFORM] Broker_Tokyo-A -> Alice: Coalition formée avec 12.0% de réduction!
+
+Bob reçoit: [INFORM] Broker_Tokyo-A -> Bob: Coalition formée avec 12.0% de réduction!
+
+Carol reçoit: [INFORM] Broker_Tokyo-A -> Carol: Coalition formée avec 12.0% de réduction!
+
+  ÉTAPE 2 — Broker crée CoalitionLeaderAgent 'Coalition_Tokyo-A_(3_membres)' et délègue la négociation.
+[Broker_Tokyo-A] NOUVELLE INSCRIPTION : Dave veut aller à Tokyo-A. (Total en attente: 1)
+[Broker_Tokyo-A] NOUVELLE INSCRIPTION : Eve veut aller à Tokyo-A. (Total en attente: 2)
+  Ordre ['Alice', 'Bob', 'Carol', 'Dave', 'Eve'] : [frozenset({'Alice', 'Bob', 'Carol'}), frozenset({'Dave'}), frozenset({'Eve'})], valeur 198.00€
+[Broker_Tokyo-B] NOUVELLE INSCRIPTION : Alice veut aller à Tokyo-B. (Total en attente: 1)
+[Broker_Tokyo-B] NOUVELLE INSCRIPTION : Dave veut aller à Tokyo-B. (Total en attente: 2)
+[Broker_Tokyo-B] NOUVELLE INSCRIPTION : Eve veut aller à Tokyo-B. (Total en attente: 3)
+
+[Broker_Tokyo-B] COALITION FORMÉE (3 membres) pour Tokyo-B !
+
+Alice reçoit: [INFORM] Broker_Tokyo-B -> Alice: Coalition formée avec 12.0% de réduction!
+
+Dave reçoit: [INFORM] Broker_Tokyo-B -> Dave: Coalition formée avec 12.0% de réduction!
+
+Eve reçoit: [INFORM] Broker_Tokyo-B -> Eve: Coalition formée avec 12.0% de réduction!
+
+  ÉTAPE 2 — Broker crée CoalitionLeaderAgent 'Coalition_Tokyo-B_(3_membres)' et délègue la négociation.
+[Broker_Tokyo-B] NOUVELLE INSCRIPTION : Bob veut aller à Tokyo-B. (Total en attente: 1)
+[Broker_Tokyo-B] NOUVELLE INSCRIPTION : Carol veut aller à Tokyo-B. (Total en attente: 2)
+  Ordre ['Alice', 'Dave', 'Eve', 'Bob', 'Carol'] : [frozenset({'Alice', 'Dave', 'Eve'}), frozenset({'Bob'}), frozenset({'Carol'})], valeur 181.20€
+  IDP : [frozenset({'Alice', 'Dave'}), frozenset({'Eve', 'Bob', 'Carol'})], valeur 250.60€
+  Écarts IDP : 52.60€ et 69.40€
+
+  Négociations effectives : structure optimale
+
+  ÉTAPE 3 — CoalitionLeaderAgent négocie directement avec le vendeur.
+
+--- DÉBUT DE LA NÉGOCIATION DE GROUPE ---
+[Groupe1_Alice_Dave] Je représente 2 voyageurs.
+[Groupe1_Alice_Dave] Budget cumulé : 980€.
+[Groupe1_Alice_Dave] Réduction garantie par la coalition : 5%.
+[Groupe1_Alice_Dave] Négociation avec GroupSeller (plancher total : 760.00€, budget total : 980.00€).
+
+GroupSeller reçoit: [CFP] Groupe1_Alice_Dave -> GroupSeller: {'destination': 'groupe'}
+GroupSeller (Raisonnement): Un client cherche un billet. Je propose 1064.00€.
+[Groupe1_Alice_Dave] Contre-offre du groupe : 646.80€.
+
+GroupSeller reçoit: [PROPOSE] Groupe1_Alice_Dave -> GroupSeller: {'price': 646.8000000000001}
+GroupSeller (Raisonnement): L'offre est trop basse. Je fais une contre-proposition à 957.60€.
+[Groupe1_Alice_Dave] Prix 957.60€ acceptable. J'ACCEPTE pour le groupe.
+
+[Groupe1_Alice_Dave] ACCORD OBTENU à 957.60€ (478.80€/billet en moyenne).
+
+  Valeur de Shapley & transferts de tokens (C3a, p.36-45) :
+  Agent         φᵢ(v)  Part payée  Part égale  Transfert token
+  ────────── ────────  ──────────  ──────────  ──────────────────────
+  Alice         24.50      478.80€      478.80€  0.00€  (= moyenne)
+  Dave          24.50      478.80€      478.80€  0.00€  (= moyenne)
+  ────────── ────────  ──────────  ──────────  ──────────────────────
+  Σ             49.00      957.60€  (efficacité : Σφᵢ=v(c)=49.00, Σtoken=0)
+  → Alice paie 478.80€ (budget : 500.00€, reste : 21.20€)
+  → Dave paie 478.80€ (budget : 480.00€, reste : 1.20€)
+
+  ┌─ Avantage réel de la coalition :
+  │  Plancher sans remise : 800.00€ au total
+  │  Plancher avec remise : 760.00€ au total
+  │  Économie plancher    : 40.00€ au total
+  └───────────────────────────────────────────────────────
+-----------------------------------------
+
+
+  ÉTAPE 3 — CoalitionLeaderAgent négocie directement avec le vendeur.
+
+--- DÉBUT DE LA NÉGOCIATION DE GROUPE ---
+[Groupe2_Bob_Carol_Eve] Je représente 3 voyageurs.
+[Groupe2_Bob_Carol_Eve] Budget cumulé : 1680€.
+[Groupe2_Bob_Carol_Eve] Réduction garantie par la coalition : 12%.
+[Groupe2_Bob_Carol_Eve] Négociation avec GroupSeller (plancher total : 1056.00€, budget total : 1680.00€).
+
+GroupSeller reçoit: [CFP] Groupe2_Bob_Carol_Eve -> GroupSeller: {'destination': 'groupe'}
+GroupSeller (Raisonnement): Un client cherche un billet. Je propose 1478.40€.
+[Groupe2_Bob_Carol_Eve] Prix 1478.40€ acceptable. J'ACCEPTE pour le groupe.
+
+[Groupe2_Bob_Carol_Eve] ACCORD OBTENU à 1478.40€ (492.80€/billet en moyenne).
+
+  Valeur de Shapley & transferts de tokens (C3a, p.36-45) :
+  Agent         φᵢ(v)  Part payée  Part égale  Transfert token
+  ────────── ────────  ──────────  ──────────  ──────────────────────
+  Bob           68.20      491.80€      492.80€  reçoit  +1.00€  (atout)
+  Carol         66.95      493.05€      492.80€  envoie  -0.25€  (fardeau)
+  Eve           66.45      493.55€      492.80€  envoie  -0.75€  (fardeau)
+  ────────── ────────  ──────────  ──────────  ──────────────────────
+  Σ            201.60     1478.40€  (efficacité : Σφᵢ=v(c)=201.60, Σtoken=0)
+  → Bob paie 491.80€ (budget : 600.00€, reste : 108.20€)
+  → Carol paie 493.05€ (budget : 550.00€, reste : 56.95€)
+  → Eve paie 493.55€ (budget : 530.00€, reste : 36.45€)
+
+  ┌─ Avantage réel de la coalition :
+  │  Plancher sans remise : 1200.00€ au total
+  │  Plancher avec remise : 1056.00€ au total
+  │  Économie plancher    : 144.00€ au total
+  └───────────────────────────────────────────────────────
+-----------------------------------------
+
+  Meilleure scission 2+3 : 217.00€ ; grand coalition : 798.00€
+
+  ┌─ IDP — fonction super-additive
+  │  SC*           = { {Alice, Bob, Carol, Dave, Eve} }
+  │  V(SC*)        = 798.00
+  │  valeur optimale = 798.00€
+  └──────────────────────────────────────────────────────────
+
+  Négociations effectives : grande coalition
+
+  ÉTAPE 3 — CoalitionLeaderAgent négocie directement avec le vendeur.
+
+--- DÉBUT DE LA NÉGOCIATION DE GROUPE ---
+[Groupe1_Alice_Bob_Carol_Dave_Eve] Je représente 5 voyageurs.
+[Groupe1_Alice_Bob_Carol_Dave_Eve] Budget cumulé : 2660€.
+[Groupe1_Alice_Bob_Carol_Dave_Eve] Réduction garantie par la coalition : 30%.
+[Groupe1_Alice_Bob_Carol_Dave_Eve] Négociation avec GroupSeller (plancher total : 1400.00€, budget total : 2660.00€).
+
+GroupSeller reçoit: [CFP] Groupe1_Alice_Bob_Carol_Dave_Eve -> GroupSeller: {'destination': 'groupe'}
+GroupSeller (Raisonnement): Un client cherche un billet. Je propose 1960.00€.
+[Groupe1_Alice_Bob_Carol_Dave_Eve] Prix 1960.00€ acceptable. J'ACCEPTE pour le groupe.
+
+[Groupe1_Alice_Bob_Carol_Dave_Eve] ACCORD OBTENU à 1960.00€ (392.00€/billet en moyenne).
+
+  Valeur de Shapley & transferts de tokens (C3a, p.36-45) :
+  Agent         φᵢ(v)  Part payée  Part égale  Transfert token
+  ────────── ────────  ──────────  ──────────  ──────────────────────
+  Alice        156.80      394.80€      392.00€  envoie  -2.80€  (fardeau)
+  Bob          165.55      386.05€      392.00€  reçoit  +5.95€  (atout)
+  Carol        161.18      390.42€      392.00€  reçoit  +1.58€  (atout)
+  Dave         155.05      396.55€      392.00€  envoie  -4.55€  (fardeau)
+  Eve          159.43      392.17€      392.00€  envoie  -0.17€  (fardeau)
+  ────────── ────────  ──────────  ──────────  ──────────────────────
+  Σ            798.00     1960.00€  (efficacité : Σφᵢ=v(c)=798.00, Σtoken=0)
+  → Alice paie 394.80€ (budget : 500.00€, reste : 105.20€)
+  → Bob paie 386.05€ (budget : 600.00€, reste : 213.95€)
+  → Carol paie 390.42€ (budget : 550.00€, reste : 159.58€)
+  → Dave paie 396.55€ (budget : 480.00€, reste : 83.45€)
+  → Eve paie 392.17€ (budget : 530.00€, reste : 137.83€)
+
+  ┌─ Avantage réel de la coalition :
+  │  Plancher sans remise : 2000.00€ au total
+  │  Plancher avec remise : 1400.00€ au total
+  │  Économie plancher    : 600.00€ au total
+  └───────────────────────────────────────────────────────
+-----------------------------------------
+
+
+FIN DES SCÉNARIOS

@@ -1,0 +1,171 @@
+{
+  "format": "offer-catalog-v2",
+  "catalog_version": "catalog-v2",
+  "currency": "EUR",
+  "synthetic": true,
+  "offers": [
+    {
+      "offer_id": "lys-alg-brs-20270215",
+      "supplier_id": "Brisolis",
+      "origin": "Lyon",
+      "destination": "Alger",
+      "outbound": {
+        "departure_date": "2027-02-15",
+        "arrival_date": "2027-02-15",
+        "direct": true,
+        "capacity_seats": 40,
+        "leg_ref": "BRS-311-20270215"
+      },
+      "return": {
+        "departure_date": "2027-02-25",
+        "arrival_date": "2027-02-25",
+        "direct": true,
+        "capacity_seats": 40,
+        "leg_ref": "BRS-312-20270225"
+      },
+      "capacity_seats": 40,
+      "tiers": [
+        {
+          "min_seats": 1,
+          "list_per_seat_cents": 32000,
+          "seller_floor_per_seat_cents": 22400
+        },
+        {
+          "min_seats": 3,
+          "list_per_seat_cents": 29000,
+          "seller_floor_per_seat_cents": 20300
+        },
+        {
+          "min_seats": 6,
+          "list_per_seat_cents": 26500,
+          "seller_floor_per_seat_cents": 18550
+        }
+      ]
+    },
+    {
+      "offer_id": "lys-alg-clq-20270215",
+      "supplier_id": "Calanqua",
+      "origin": "Lyon",
+      "destination": "Alger",
+      "outbound": {
+        "departure_date": "2027-02-15",
+        "arrival_date": "2027-02-15",
+        "direct": true,
+        "capacity_seats": 30,
+        "leg_ref": "CLQ-120-20270215"
+      },
+      "return": {
+        "departure_date": "2027-02-25",
+        "arrival_date": "2027-02-25",
+        "direct": false,
+        "capacity_seats": 28,
+        "leg_ref": "CLQ-121-20270225"
+      },
+      "capacity_seats": 28,
+      "tiers": [
+        {
+          "min_seats": 1,
+          "list_per_seat_cents": 29000,
+          "seller_floor_per_seat_cents": 20300
+        },
+        {
+          "min_seats": 4,
+          "list_per_seat_cents": 27000,
+          "seller_floor_per_seat_cents": 18900
+        }
+      ]
+    },
+    {
+      "offer_id": "lys-alg-orv-20270215",
+      "supplier_id": "Orvalis",
+      "origin": "Lyon",
+      "destination": "Alger",
+      "outbound": {
+        "departure_date": "2027-02-15",
+        "arrival_date": "2027-02-15",
+        "direct": true,
+        "capacity_seats": 40,
+        "leg_ref": "ORV-501-20270215"
+      },
+      "return": {
+        "departure_date": "2027-02-27",
+        "arrival_date": "2027-02-27",
+        "direct": true,
+        "capacity_seats": 40,
+        "leg_ref": "ORV-502-20270227"
+      },
+      "capacity_seats": 40,
+      "tiers": [
+        {
+          "min_seats": 1,
+          "list_per_seat_cents": 30500,
+          "seller_floor_per_seat_cents": 21350
+        },
+        {
+          "min_seats": 4,
+          "list_per_seat_cents": 28000,
+          "seller_floor_per_seat_cents": 19600
+        }
+      ]
+    },
+    {
+      "offer_id": "lys-alg-vlt-20270215",
+      "supplier_id": "Veltrane",
+      "origin": "Lyon",
+      "destination": "Alger",
+      "outbound": {
+        "departure_date": "2027-02-15",
+        "arrival_date": "2027-02-15",
+        "direct": true,
+        "capacity_seats": 30,
+        "leg_ref": "VLT-77-20270215"
+      },
+      "capacity_seats": 30,
+      "tiers": [
+        {
+          "min_seats": 1,
+          "list_per_seat_cents": 17000,
+          "seller_floor_per_seat_cents": 11900
+        },
+        {
+          "min_seats": 4,
+          "list_per_seat_cents": 15500,
+          "seller_floor_per_seat_cents": 10850
+        }
+      ]
+    },
+    {
+      "offer_id": "mrs-alg-orv-20270215",
+      "supplier_id": "Orvalis",
+      "origin": "Marseille",
+      "destination": "Alger",
+      "outbound": {
+        "departure_date": "2027-02-15",
+        "arrival_date": "2027-02-15",
+        "direct": true,
+        "capacity_seats": 40,
+        "leg_ref": "ORV-601-20270215"
+      },
+      "return": {
+        "departure_date": "2027-02-25",
+        "arrival_date": "2027-02-25",
+        "direct": true,
+        "capacity_seats": 40,
+        "leg_ref": "ORV-602-20270225"
+      },
+      "capacity_seats": 40,
+      "tiers": [
+        {
+          "min_seats": 1,
+          "list_per_seat_cents": 30000,
+          "seller_floor_per_seat_cents": 21000
+        },
+        {
+          "min_seats": 4,
+          "list_per_seat_cents": 27500,
+          "seller_floor_per_seat_cents": 19250
+        }
+      ]
+    }
+  ]
+}

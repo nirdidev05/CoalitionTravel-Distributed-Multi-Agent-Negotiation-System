@@ -1,0 +1,27 @@
+{
+  "version": "places-v1",
+  "places": [
+    {
+      "name": "Alger",
+      "aliases": [
+        "Algiers",
+        "ALG",
+        "Argel"
+      ]
+    },
+    {
+      "name": "Lyon",
+      "aliases": [
+        "LYS",
+        "Lyons"
+      ]
+    },
+    {
+      "name": "Marseille",
+      "aliases": [
+        "Marseilles",
+        "MRS"
+      ]
+    }
+  ]
+}

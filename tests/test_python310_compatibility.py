@@ -21,8 +21,24 @@ STDLIB_ONLY_MODULES = (
     "coalition_travel.domain.traveler_profile",
     "coalition_travel.domain.travel_unit",
     "coalition_travel.domain.offer",
+    "coalition_travel.domain.admissibility",
+    "coalition_travel.domain.offer_graph",
+    "coalition_travel.domain.negotiation_request",
+    "coalition_travel.application.lot_admissibility",
+    "coalition_travel.application.reference_costs",
     "coalition_travel.infrastructure.catalog.json_catalog",
     "coalition_travel.infrastructure.evaluation.provenance",
+    # P3: they also import the historical agents, which use the standard library only.
+    "coalition_travel.infrastructure.negotiation.mandate_leader",
+    "coalition_travel.infrastructure.negotiation.simulated_oracle",
+    # P4 modules that need no NumPy or SciPy.
+    "coalition_travel.domain.coalition_game",
+    "coalition_travel.application.coalition_candidates",
+    "coalition_travel.application.coalition_feasibility",
+    "coalition_travel.application.negotiation_cache",
+    "coalition_travel.application.coalition_costs",
+    "coalition_travel.application.formation_baselines",
+    "coalition_travel.infrastructure.evaluation.formation_report",
 )
 
 pytestmark = pytest.mark.skipif(PYTHON310 is None, reason="python3.10 is not installed")

@@ -1,0 +1,1728 @@
+diff -ruN -x __pycache__ -x *.egg-info a/Multi-Agent/coalition_travel/application/coalition_formation.py b/Multi-Agent/coalition_travel/application/coalition_formation.py
+--- a/Multi-Agent/coalition_travel/application/coalition_formation.py	2026-11-19 06:53:49
++++ b/Multi-Agent/coalition_travel/application/coalition_formation.py	2026-11-19 17:17:53
+@@ -372,6 +372,24 @@
+     )
+ 
+ 
++@dataclass(frozen=True)
++class FormationStages:
++    """The three results of the pipeline, kept for callers that must explain them (3H).
++
++    ``references`` is None exactly when H2 fails: the oracle is then never called.
++    """
++
++    lot: LotAdmissibilityResult
++    references: ReferenceCostsResult | None
++    formation: FormationResult
++
++    def __post_init__(self):
++        if (self.references is None) != (self.formation.status == "capacity_model_violated"):
++            raise FormationConsistencyError(
++                "references are absent exactly when the capacity model is violated"
++            )
++
++
+ def run_formation_pipeline(
+     units: Iterable[TravelUnit],
+     catalog: OfferCatalog,
+@@ -385,8 +403,33 @@
+     """P2 admissibility, H2, cached references and formation, in one deterministic call.
+ 
+     When H2 fails, the result has status ``capacity_model_violated`` and the oracle is
+-    never called (section 5).
++    never called (section 5). Thin wrapper of ``run_formation_stages`` (3H, I1).
+     """
++    return run_formation_stages(
++        units,
++        catalog,
++        reference_date,
++        oracle,
++        limits=limits,
++        method=method,
++        cross_checks=cross_checks,
++    ).formation
++
++
++def run_formation_stages(
++    units: Iterable[TravelUnit],
++    catalog: OfferCatalog,
++    reference_date: date,
++    oracle: ConfiguredNegotiationOracle,
++    *,
++    limits: FormationLimits = DEFAULT_LIMITS,
++    method: SolverMethod = "idp",
++    cross_checks: tuple[SolverMethod, ...] = ("dp", "brute_force"),
++) -> FormationStages:
++    """Same computation as ``run_formation_pipeline``, returning the lot and references too.
++
++    The body is the former pipeline, unchanged: only the return value differs.
++    """
+     lot = lot_admissibility(units, catalog, reference_date)
+     caching = (
+         oracle if isinstance(oracle, CachingNegotiationOracle) else CachingNegotiationOracle(oracle)
+@@ -399,7 +442,7 @@
+         unresolved = tuple(
+             sorted(unit.unit_id for unit in lot.relation.units if unit.unit_id not in excluded)
+         )
+-        return FormationResult(
++        violated = FormationResult(
+             formation_run_id=run_id,
+             admissibility_id=lot.admissibility_id,
+             oracle_configuration_id=caching.oracle_configuration_id,
+@@ -420,7 +463,9 @@
+             ),
+             cache_statistics=caching.statistics,
+         )
++        return FormationStages(lot, None, violated)
+     references = compute_reference_costs(lot, caching)
+-    return form_coalitions(
++    formation = form_coalitions(
+         lot, references, caching, limits=limits, method=method, cross_checks=cross_checks
+     )
++    return FormationStages(lot, references, formation)
+diff -ruN -x __pycache__ -x *.egg-info a/Multi-Agent/coalition_travel/application/trip_planning.py b/Multi-Agent/coalition_travel/application/trip_planning.py
+--- a/Multi-Agent/coalition_travel/application/trip_planning.py	1970-01-01 01:00:00
++++ b/Multi-Agent/coalition_travel/application/trip_planning.py	2026-11-19 17:19:25
+@@ -0,0 +1,378 @@
++"""Planning of one lot on the 3H path (plan 3H/P5, step I1).
++
++``plan_lot`` chains the existing contracts without changing any of them:
++
++    focus drafts ─► build_travel_unit ─┐
++    pool drafts  ─► build_travel_unit ─┴► lot selection (same route)
++        ─► run_formation_stages (P2 admissibility and H2, P2/P3 references, P4 formation)
++           with one CachingNegotiationOracle over one journaling session
++        ─► journal invariants J3 to J5 checked ─► TripPlan
++
++Rules (plan §3.1, §4.3, §4.4, §6.3):
++
++- a *focus* request is a traveller's own request; the CLI v1 sends one, the session mode
++  (deferred) will send several. If any focus request cannot become a unit, nothing is
++  negotiated and the plan has status ``request_rejected`` (all or nothing, so that the
++  composition of a lot never changes silently);
++- a *pool* request comes from the versioned synthetic demand pool. A pool request that
++  cannot become a unit is a data error (``PoolRequestError``), never a traveller error;
++- the lot holds the focus units and the pool units on the same route. In v1 the route
++  is the destination key; I4 adds the origin and the trip type;
++- references and coalitions share one cache over one journaling session (P4 contract),
++  so no mandate is negotiated twice and every attempt finds its canonical journal.
++
++This module imports no infrastructure: the market and its sessions are ports.
++"""
++
++from collections.abc import Mapping
++from dataclasses import dataclass
++from datetime import date, datetime
++from types import MappingProxyType
++from typing import Literal, Protocol
++
++from coalition_travel.application.coalition_candidates import DEFAULT_LIMITS, FormationLimits
++from coalition_travel.application.coalition_formation import (
++    FormationResult,
++    FormationStages,
++    run_formation_stages,
++)
++from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.travel_units import TravelUnitError, build_travel_unit
++from coalition_travel.domain.negotiation_request import NegotiationOutcome, NegotiationRequest
++from coalition_travel.domain.offer import OfferCatalog
++from coalition_travel.domain.travel_unit import MAX_UNIT_ID_LENGTH, TravelUnit
++
++PLANNING_VERSION = "3h-planning-v1"
++PlanStatus = Literal["planned", "request_rejected"]
++
++
++class PlanningInputError(ValueError):
++    """The planning input is inconsistent (identifiers, dates, pool and catalogue)."""
++
++
++class PoolRequestError(ValueError):
++    """A request of the synthetic demand pool cannot become a travel unit (data error)."""
++
++
++class PlanConsistencyError(RuntimeError):
++    """A journal invariant (J3 to J5) does not hold for the planned lot."""
++
++
++# --- ports -------------------------------------------------------------------------------
++
++
++class NegotiationJournalView(Protocol):
++    """Public fields of a negotiation journal used by the invariants."""
++
++    request_key: str
++    oracle_configuration_id: str
++    status: str
++    agreed_total_cents: int | None
++    router_iterations: int
++    journal_sha256: str
++
++
++class JournalingSession(Protocol):
++    """Configured oracle that keeps one canonical journal per request_key."""
++
++    oracle_configuration_id: str
++
++    def negotiate(self, request: NegotiationRequest) -> NegotiationOutcome: ...
++
++    def journal_for(self, request_key: str) -> NegotiationJournalView: ...
++
++    @property
++    def journals(self) -> Mapping[str, NegotiationJournalView]: ...
++
++    @property
++    def oracle_calls(self) -> int: ...
++
++
++class NegotiationMarket(Protocol):
++    """Public catalogue and a factory of fresh journaling sessions."""
++
++    @property
++    def catalog(self) -> OfferCatalog: ...
++
++    @property
++    def reference_date(self) -> date: ...
++
++    @property
++    def oracle_configuration_id(self) -> str: ...
++
++    def open_session(self) -> JournalingSession: ...
++
++
++# --- input -------------------------------------------------------------------------------
++
++
++def _require_date(value, name: str) -> None:
++    if isinstance(value, datetime) or type(value) is not date:
++        raise TypeError(f"{name} must be a datetime.date")
++
++
++@dataclass(frozen=True)
++class PlanningRequest:
++    request_id: str
++    draft: TravelRequestDraft
++
++    def __post_init__(self):
++        if type(self.request_id) is not str:
++            raise TypeError("request_id must be a string")
++        if (
++            not self.request_id
++            or self.request_id != self.request_id.strip()
++            or len(self.request_id) > MAX_UNIT_ID_LENGTH
++        ):
++            raise PlanningInputError("request_id must be non-blank, stripped and short")
++        if not isinstance(self.draft, TravelRequestDraft):
++            raise TypeError("draft must be a TravelRequestDraft")
++
++
++@dataclass(frozen=True)
++class DemandPoolSnapshot:
++    """Requests of one versioned synthetic demand pool, with its provenance."""
++
++    version: str
++    sha256: str
++    catalog_version: str
++    requests: tuple[PlanningRequest, ...]
++
++    def __post_init__(self):
++        for name in ("version", "sha256", "catalog_version"):
++            if type(getattr(self, name)) is not str or not getattr(self, name):
++                raise TypeError(f"{name} must be a non-empty string")
++        if type(self.requests) is not tuple or any(
++            type(item) is not PlanningRequest for item in self.requests
++        ):
++            raise TypeError("requests must be a tuple of PlanningRequest")
++        identifiers = [item.request_id for item in self.requests]
++        if len(set(identifiers)) != len(identifiers):
++            raise PlanningInputError("pool request identifiers must be unique")
++
++
++@dataclass(frozen=True)
++class PlanningInput:
++    focus: tuple[PlanningRequest, ...]
++    pool: DemandPoolSnapshot | None
++    reference_date: date
++    limits: FormationLimits = DEFAULT_LIMITS
++
++    def __post_init__(self):
++        if type(self.focus) is not tuple or not self.focus:
++            raise PlanningInputError("at least one focus request is required")
++        if any(type(item) is not PlanningRequest for item in self.focus):
++            raise TypeError("focus must be a tuple of PlanningRequest")
++        if self.pool is not None and type(self.pool) is not DemandPoolSnapshot:
++            raise TypeError("pool must be a DemandPoolSnapshot or None")
++        _require_date(self.reference_date, "reference_date")
++        if type(self.limits) is not FormationLimits:
++            raise TypeError("limits must be FormationLimits")
++        focus_ids = [item.request_id for item in self.focus]
++        if len(set(focus_ids)) != len(focus_ids):
++            raise PlanningInputError("focus request identifiers must be unique")
++        pool_ids = set() if self.pool is None else {r.request_id for r in self.pool.requests}
++        shared = sorted(set(focus_ids) & pool_ids)
++        if shared:
++            raise PlanningInputError(f"identifiers used by both focus and pool: {shared}")
++
++
++# --- output ------------------------------------------------------------------------------
++
++
++@dataclass(frozen=True)
++class RequestRejection:
++    request_id: str
++    reason: str
++    status: str | None
++    missing_fields: tuple[str, ...]
++    errors: tuple[str, ...]
++
++
++@dataclass(frozen=True)
++class JournalInvariants:
++    """Counts behind J3 to J5, all verified equal where the plan requires it."""
++
++    attempts: int
++    distinct_keys: int
++    journals: int
++    oracle_calls: int
++    cache_requests: int
++
++
++@dataclass(frozen=True)
++class TripPlan:
++    status: PlanStatus
++    focus_request_ids: tuple[str, ...]
++    rejections: tuple[RequestRejection, ...]
++    units: tuple[TravelUnit, ...]
++    pool_unit_ids: tuple[str, ...]
++    stages: FormationStages | None
++    journals: Mapping[str, NegotiationJournalView]
++    invariants: JournalInvariants | None
++    reference_date: date
++    catalog_version: str
++    catalog_sha256: str
++    oracle_configuration_id: str
++    pool_version: str | None
++    pool_sha256: str | None
++    planning_version: str = PLANNING_VERSION
++
++    def __post_init__(self):
++        if (self.status == "planned") != (self.stages is not None):
++            raise PlanConsistencyError("stages are present exactly for a planned lot")
++        if (self.status == "request_rejected") != bool(self.rejections):
++            raise PlanConsistencyError("rejections are present exactly for a rejected plan")
++
++    @property
++    def formation(self) -> FormationResult | None:
++        return None if self.stages is None else self.stages.formation
++
++    @property
++    def lot_unit_ids(self) -> tuple[str, ...]:
++        return tuple(sorted(unit.unit_id for unit in self.units))
++
++    def journal_for(self, request_key: str) -> NegotiationJournalView:
++        return self.journals[request_key]
++
++
++# --- planning ----------------------------------------------------------------------------
++
++
++def route_key(unit: TravelUnit) -> str:
++    """Route of a unit for lot selection. v1: destination key (I4 adds origin and type)."""
++    return unit.destination_key
++
++
++def verify_journal_invariants(
++    stages: FormationStages, journals: Mapping[str, NegotiationJournalView], oracle_calls: int
++) -> JournalInvariants:
++    """Check J3, J4 and J5 on the normal planning path (cache above the journaling session).
++
++    J1 (one canonical journal per key) and J2 (journal/outcome concordance) are enforced by
++    the session when it stores a journal.
++    """
++    attempts = []
++    if stages.references is not None:
++        for reference in stages.references.unit_references:
++            attempts.extend(reference.attempts)
++    for cost in stages.formation.evaluations:
++        attempts.extend(cost.attempts)
++    keys = {attempt.request_key for attempt in attempts}
++    for attempt in attempts:  # J3
++        journal = journals.get(attempt.request_key)
++        if journal is None:
++            raise PlanConsistencyError(f"J3: no journal for request_key {attempt.request_key}")
++        if (
++            journal.request_key,
++            journal.status,
++            journal.agreed_total_cents,
++            journal.router_iterations,
++        ) != (attempt.request_key, attempt.status, attempt.agreed_total_cents, attempt.turns):
++            raise PlanConsistencyError(
++                f"J3: attempt and journal disagree for request_key {attempt.request_key}"
++            )
++    superfluous = sorted(set(journals) - keys)  # J4
++    if superfluous:
++        raise PlanConsistencyError(f"J4: journals without attempt: {superfluous[:3]}")
++    statistics = stages.formation.cache_statistics
++    if statistics is None:
++        raise PlanConsistencyError("J5: the formation result carries no cache statistics")
++    if not len(journals) == statistics.oracle_calls == len(keys) == oracle_calls:  # J5
++        raise PlanConsistencyError(
++            "J5: journals, oracle calls and distinct attempt keys differ "
++            f"({len(journals)}, {statistics.oracle_calls}, {len(keys)}, {oracle_calls})"
++        )
++    if len(attempts) != statistics.requests:
++        raise PlanConsistencyError(
++            f"J5: {len(attempts)} attempts for {statistics.requests} cache requests"
++        )
++    return JournalInvariants(
++        attempts=len(attempts),
++        distinct_keys=len(keys),
++        journals=len(journals),
++        oracle_calls=statistics.oracle_calls,
++        cache_requests=statistics.requests,
++    )
++
++
++def plan_lot(planning: PlanningInput, market: NegotiationMarket) -> TripPlan:
++    """Plan one lot: units, P2 admissibility and references, P4 formation, journals."""
++    if type(planning) is not PlanningInput:
++        raise TypeError("planning must be a PlanningInput")
++    if market.reference_date != planning.reference_date:
++        raise PlanningInputError("the market and the planning use different reference dates")
++    catalog = market.catalog
++    pool = planning.pool
++    if pool is not None and pool.catalog_version != catalog.version:
++        raise PlanningInputError(
++            f"pool {pool.version} targets {pool.catalog_version}, not {catalog.version}"
++        )
++    provenance = {
++        "reference_date": planning.reference_date,
++        "catalog_version": catalog.version,
++        "catalog_sha256": catalog.sha256,
++        "oracle_configuration_id": market.oracle_configuration_id,
++        "pool_version": None if pool is None else pool.version,
++        "pool_sha256": None if pool is None else pool.sha256,
++    }
++    focus_ids = tuple(item.request_id for item in planning.focus)
++
++    focus_units: list[TravelUnit] = []
++    rejections: list[RequestRejection] = []
++    for item in planning.focus:
++        try:
++            focus_units.append(
++                build_travel_unit(item.request_id, item.draft, planning.reference_date)
++            )
++        except TravelUnitError as exc:
++            rejections.append(
++                RequestRejection(
++                    item.request_id, exc.reason, exc.status, exc.missing_fields, exc.errors
++                )
++            )
++    if rejections:
++        return TripPlan(
++            status="request_rejected",
++            focus_request_ids=focus_ids,
++            rejections=tuple(rejections),
++            units=(),
++            pool_unit_ids=(),
++            stages=None,
++            journals=MappingProxyType({}),
++            invariants=None,
++            **provenance,
++        )
++
++    routes = {route_key(unit) for unit in focus_units}
++    pool_units: list[TravelUnit] = []
++    for item in () if pool is None else pool.requests:
++        try:
++            unit = build_travel_unit(item.request_id, item.draft, planning.reference_date)
++        except TravelUnitError as exc:
++            raise PoolRequestError(f"pool request {item.request_id}: {exc}") from exc
++        if route_key(unit) in routes:
++            pool_units.append(unit)
++
++    session = market.open_session()
++    if session.journals or session.oracle_calls:
++        raise PlanConsistencyError("a planning session must start without journals or calls")
++    if session.oracle_configuration_id != market.oracle_configuration_id:
++        raise PlanConsistencyError("the session and the market use different configurations")
++    units = tuple(focus_units) + tuple(pool_units)
++    stages = run_formation_stages(
++        units, catalog, planning.reference_date, session, limits=planning.limits
++    )
++    journals = MappingProxyType(dict(session.journals))
++    invariants = verify_journal_invariants(stages, journals, session.oracle_calls)
++    return TripPlan(
++        status="planned",
++        focus_request_ids=focus_ids,
++        rejections=(),
++        units=tuple(sorted(units, key=lambda unit: unit.unit_id)),
++        pool_unit_ids=tuple(sorted(unit.unit_id for unit in pool_units)),
++        stages=stages,
++        journals=journals,
++        invariants=invariants,
++        **provenance,
++    )
+diff -ruN -x __pycache__ -x *.egg-info a/Multi-Agent/coalition_travel/infrastructure/demand/__init__.py b/Multi-Agent/coalition_travel/infrastructure/demand/__init__.py
+--- a/Multi-Agent/coalition_travel/infrastructure/demand/__init__.py	1970-01-01 01:00:00
++++ b/Multi-Agent/coalition_travel/infrastructure/demand/__init__.py	2026-11-19 17:20:18
+@@ -0,0 +1 @@
++"""Synthetic demand pool adapters (plan 3H/P5, step I1)."""
+diff -ruN -x __pycache__ -x *.egg-info a/Multi-Agent/coalition_travel/infrastructure/demand/demand_pool.py b/Multi-Agent/coalition_travel/infrastructure/demand/demand_pool.py
+--- a/Multi-Agent/coalition_travel/infrastructure/demand/demand_pool.py	1970-01-01 01:00:00
++++ b/Multi-Agent/coalition_travel/infrastructure/demand/demand_pool.py	2026-11-19 17:20:01
+@@ -0,0 +1,157 @@
++"""Strict loader of the versioned synthetic demand pool (plan 3H/P5, ID-1, step I1).
++
++The pool holds requests that are already structured (``TravelRequestDraft`` fields), not
++free text, so that a demonstration lot is reproducible and independent of the LLM. The
++file is JSON Lines: one object per line with exactly the keys ``request_id``,
++``synthetic`` (must be true) and ``draft``. Budgets are JSON strings ("520.00"): decimal
++numbers, NaN and Infinity are refused, as in the catalogue loader.
++
++The manifest lives at ``path.with_suffix(".manifest.json")`` and pins the file's SHA-256,
++its version, the catalogue version it targets and the number of requests. Pool request
++identifiers start with ``pool-`` so that they never collide with a traveller's request.
++"""
++
++import hashlib
++import json
++import re
++from pathlib import Path
++
++from pydantic import ValidationError
++
++from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.trip_planning import DemandPoolSnapshot, PlanningRequest
++
++LINE_KEYS = frozenset({"request_id", "synthetic", "draft"})
++MANIFEST_KEYS = frozenset(
++    {
++        "version",
++        "pool_file",
++        "pool_sha256",
++        "synthetic",
++        "catalog_version",
++        "requests",
++        "purpose",
++        "limitations",
++    }
++)
++POOL_ID_PATTERN = re.compile(r"pool-[a-z0-9]+(?:-[a-z0-9]+)*")
++_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
++
++
++class DemandPoolError(ValueError):
++    """The demand pool or its manifest is missing, malformed or inconsistent."""
++
++
++def load_demand_pool(path: str | Path) -> DemandPoolSnapshot:
++    """Read the pool once, check it against its manifest and return its requests."""
++    pool_path = Path(path)
++    raw = _read_bytes(pool_path)
++    sha256 = hashlib.sha256(raw).hexdigest()
++    try:
++        text = raw.decode("utf-8")
++    except UnicodeDecodeError as exc:
++        raise DemandPoolError(f"{pool_path}: invalid UTF-8") from exc
++    lines = text.split("\n")
++    if lines and lines[-1] == "":
++        lines.pop()
++    if not lines:
++        raise DemandPoolError(f"{pool_path}: the pool is empty")
++    requests = []
++    for number, line in enumerate(lines, start=1):
++        origin = f"{pool_path}:{number}"
++        item = _object(_strict_json(line, origin), LINE_KEYS, origin)
++        request_id = item["request_id"]
++        if type(request_id) is not str or not POOL_ID_PATTERN.fullmatch(request_id):
++            raise DemandPoolError(f"{origin}: request_id must match {POOL_ID_PATTERN.pattern}")
++        if item["synthetic"] is not True:
++            raise DemandPoolError(f"{origin}: synthetic must be true")
++        if type(item["draft"]) is not dict:
++            raise DemandPoolError(f"{origin}: draft must be an object")
++        try:
++            draft = TravelRequestDraft.model_validate(item["draft"])
++        except ValidationError as exc:
++            raise DemandPoolError(f"{origin}: invalid draft ({exc.error_count()} errors)") from exc
++        requests.append(PlanningRequest(request_id, draft))
++    identifiers = [item.request_id for item in requests]
++    if len(set(identifiers)) != len(identifiers):
++        raise DemandPoolError(f"{pool_path}: request_id values must be unique")
++
++    manifest_path = pool_path.with_suffix(".manifest.json")
++    if not manifest_path.is_file():
++        raise DemandPoolError(f"missing demand pool manifest: {manifest_path}")
++    manifest = _object(
++        _strict_json(_read_bytes(manifest_path).decode("utf-8"), str(manifest_path)),
++        MANIFEST_KEYS,
++        str(manifest_path),
++    )
++    origin = str(manifest_path)
++    if manifest["pool_file"] != pool_path.name:
++        raise DemandPoolError(f"{origin}: pool_file does not name {pool_path.name}")
++    declared = manifest["pool_sha256"]
++    if type(declared) is not str or not _SHA256_PATTERN.fullmatch(declared):
++        raise DemandPoolError(f"{origin}: pool_sha256 must be a lowercase SHA-256")
++    if declared != sha256:
++        raise DemandPoolError(f"{origin}: pool_sha256 {declared} does not match the file")
++    if manifest["synthetic"] is not True:
++        raise DemandPoolError(f"{origin}: synthetic must be true")
++    if type(manifest["requests"]) is not int or manifest["requests"] != len(requests):
++        raise DemandPoolError(f"{origin}: requests count does not match the pool")
++    for name in ("version", "catalog_version", "purpose"):
++        if type(manifest[name]) is not str or not manifest[name].strip():
++            raise DemandPoolError(f"{origin}: {name} must be a non-empty string")
++    limitations = manifest["limitations"]
++    if type(limitations) is not list or not limitations:
++        raise DemandPoolError(f"{origin}: limitations must be a non-empty list")
++    if any(type(item) is not str or not item.strip() for item in limitations):
++        raise DemandPoolError(f"{origin}: limitations must be non-empty strings")
++    return DemandPoolSnapshot(
++        version=manifest["version"],
++        sha256=sha256,
++        catalog_version=manifest["catalog_version"],
++        requests=tuple(requests),
++    )
++
++
++def _read_bytes(path: Path) -> bytes:
++    try:
++        return path.read_bytes()
++    except OSError as exc:
++        raise DemandPoolError(f"cannot read {path}: {exc}") from exc
++
++
++def _strict_json(text: str, origin: str):
++    """Parse JSON refusing decimal numbers, NaN/Infinity and duplicate keys."""
++
++    def reject_float(token):
++        raise DemandPoolError(f"{origin}: decimal number {token} is not allowed")
++
++    def reject_constant(token):
++        raise DemandPoolError(f"{origin}: constant {token} is not allowed")
++
++    def reject_duplicates(pairs):
++        result = {}
++        for key, value in pairs:
++            if key in result:
++                raise DemandPoolError(f"{origin}: duplicate key {key!r}")
++            result[key] = value
++        return result
++
++    try:
++        return json.loads(
++            text,
++            parse_float=reject_float,
++            parse_constant=reject_constant,
++            object_pairs_hook=reject_duplicates,
++        )
++    except json.JSONDecodeError as exc:
++        raise DemandPoolError(f"{origin}: invalid JSON ({exc.msg})") from exc
++
++
++def _object(value, keys: frozenset, origin: str) -> dict:
++    if type(value) is not dict:
++        raise DemandPoolError(f"{origin}: expected an object")
++    missing = sorted(keys - value.keys())
++    unknown = sorted(value.keys() - keys)
++    if missing or unknown:
++        raise DemandPoolError(f"{origin}: missing keys {missing}, unknown keys {unknown}")
++    return value
+diff -ruN -x __pycache__ -x *.egg-info a/Multi-Agent/coalition_travel/infrastructure/negotiation/journaling_oracle.py b/Multi-Agent/coalition_travel/infrastructure/negotiation/journaling_oracle.py
+--- a/Multi-Agent/coalition_travel/infrastructure/negotiation/journaling_oracle.py	1970-01-01 01:00:00
++++ b/Multi-Agent/coalition_travel/infrastructure/negotiation/journaling_oracle.py	2026-11-19 17:23:33
+@@ -0,0 +1,135 @@
++"""Journaling adapter placed under the negotiation cache (plan 3H/P5, §4.4).
++
++``CachingNegotiationOracle`` keeps only ``NegotiationOutcome`` values. To show the
++negotiations to a traveller without negotiating twice, this adapter sits between the
++cache and the simulated oracle:
++
++    CachingNegotiationOracle ─► JournalingNegotiationOracle ─► SimulatedNegotiationOracle
++
++On every real call it runs, in this order:
++
++1. ``negotiate_detailed`` on the wrapped oracle;
++2. the P2 outcome contract check, with the same function as the cache
++   (``validate_negotiation_outcome``), so that no journal is ever kept for an outcome the
++   cache would refuse;
++3. the journal/outcome concordance check (invariant J2);
++4. storage of the journal as the canonical journal of its ``request_key`` (J1), or
++   deduplication when that key already has a journal (§4.4.2);
++5. return of the outcome alone.
++
++A cache hit never reaches this adapter: it reuses the canonical journal stored at the
++corresponding miss. The adapter caches no outcome itself; that remains the cache's role.
++
++Journals carry public amounts only (offers exchanged, list price, agreement); no seller
++floor or private term is stored here.
++"""
++
++from collections.abc import Mapping
++from types import MappingProxyType
++from typing import Protocol
++
++from coalition_travel.application.reference_costs import validate_negotiation_outcome
++from coalition_travel.domain.negotiation_request import NegotiationOutcome, NegotiationRequest
++from coalition_travel.infrastructure.negotiation.simulated_oracle import (
++    NegotiationJournal,
++    NegotiationSimulation,
++)
++
++
++class JournalConsistencyError(RuntimeError):
++    """A journal does not describe the outcome returned with it (invariant J2)."""
++
++
++class NonDeterministicJournalError(RuntimeError):
++    """The same request_key produced two different journals or outcomes (§4.4.2)."""
++
++
++class DetailedNegotiationOracle(Protocol):
++    oracle_configuration_id: str
++
++    def negotiate_detailed(self, request: NegotiationRequest) -> NegotiationSimulation: ...
++
++
++def check_journal_concordance(journal: NegotiationJournal, outcome: NegotiationOutcome) -> None:
++    """Invariant J2: the journal describes exactly the outcome of the same negotiation."""
++    if type(journal) is not NegotiationJournal:
++        raise JournalConsistencyError("the oracle must return a NegotiationJournal")
++    mismatches = [
++        name
++        for name, journal_value, outcome_value in (
++            ("request_key", journal.request_key, outcome.request_key),
++            (
++                "oracle_configuration_id",
++                journal.oracle_configuration_id,
++                outcome.oracle_configuration_id,
++            ),
++            ("status", journal.status, outcome.status),
++            ("agreed_total_cents", journal.agreed_total_cents, outcome.agreed_total_cents),
++            ("router_iterations/turns", journal.router_iterations, outcome.turns),
++        )
++        if journal_value != outcome_value
++    ]
++    if mismatches:
++        raise JournalConsistencyError("journal and outcome disagree on " + ", ".join(mismatches))
++
++
++class JournalingNegotiationOracle:
++    """Configured P2 oracle that keeps one canonical journal per request_key.
++
++    One instance serves one planning session: create a new one per lot, so that every
++    stored journal belongs to an attempt of that lot (invariant J4).
++    """
++
++    def __init__(self, oracle: DetailedNegotiationOracle):
++        configuration = getattr(oracle, "oracle_configuration_id", None)
++        if type(configuration) is not str or not configuration.strip():
++            raise TypeError("the oracle must expose a non-blank oracle_configuration_id")
++        if not callable(getattr(oracle, "negotiate_detailed", None)):
++            raise TypeError("the oracle must provide negotiate_detailed(request)")
++        self._oracle = oracle
++        self.oracle_configuration_id = configuration
++        self._journals: dict[str, NegotiationJournal] = {}
++        self._outcomes: dict[str, NegotiationOutcome] = {}
++        self._oracle_calls = 0
++
++    def negotiate(self, request: NegotiationRequest) -> NegotiationOutcome:
++        if type(request) is not NegotiationRequest:
++            raise TypeError("request must be a NegotiationRequest")
++        simulation = self._oracle.negotiate_detailed(request)
++        self._oracle_calls += 1
++        if type(simulation) is not NegotiationSimulation:
++            raise JournalConsistencyError("negotiate_detailed must return a NegotiationSimulation")
++        outcome, journal = simulation.outcome, simulation.journal
++        # Step 2 before any storage: an outcome the cache would refuse leaves no journal.
++        validate_negotiation_outcome(
++            outcome,
++            expected_key=request.request_key,
++            reservation_cents=request.reservation_cents,
++            expected_configuration=self.oracle_configuration_id,
++        )
++        check_journal_concordance(journal, outcome)
++        key = request.request_key
++        canonical = self._journals.get(key)
++        if canonical is None:
++            self._journals[key] = journal
++            self._outcomes[key] = outcome
++        elif canonical.journal_sha256 != journal.journal_sha256 or self._outcomes[key] != outcome:
++            raise NonDeterministicJournalError(
++                f"request_key {key} produced a different journal or outcome on a repeated call"
++            )
++        # Identical journal: deduplicated, the canonical object stays in place.
++        return outcome
++
++    def journal_for(self, request_key: str) -> NegotiationJournal:
++        """Canonical journal of a negotiated key; KeyError if it was never negotiated."""
++        return self._journals[request_key]
++
++    @property
++    def journals(self) -> Mapping[str, NegotiationJournal]:
++        """Read-only view of the canonical journals, keyed by request_key."""
++        return MappingProxyType(self._journals)
++
++    @property
++    def oracle_calls(self) -> int:
++        """Real calls made to the wrapped oracle, including those that raised afterwards."""
++        return self._oracle_calls
+diff -ruN -x __pycache__ -x *.egg-info a/Multi-Agent/coalition_travel/infrastructure/negotiation/market.py b/Multi-Agent/coalition_travel/infrastructure/negotiation/market.py
+--- a/Multi-Agent/coalition_travel/infrastructure/negotiation/market.py	1970-01-01 01:00:00
++++ b/Multi-Agent/coalition_travel/infrastructure/negotiation/market.py	2026-11-19 17:18:23
+@@ -0,0 +1,70 @@
++"""Composition root of the simulated market (plan 3H/P5, §4.5).
++
++This is the only module of the 3H path that loads the catalogue with its private seller
++terms. It hands the terms book to the seller simulator and keeps no other reference to
++it: callers receive the public catalogue and journaling sessions only. It is
++allow-listed in ``tests/test_offer_catalog.py`` for that reason (reviewed change, I1).
++
++One ``SimulatedMarket`` wraps one deterministic ``SimulatedNegotiationOracle``. Each
++planning session gets a fresh ``JournalingNegotiationOracle`` on top of it, so the
++journals of a lot never mix with those of another lot.
++"""
++
++from datetime import date, datetime
++from pathlib import Path
++
++from coalition_travel.domain.offer import OfferCatalog
++from coalition_travel.infrastructure.catalog.json_catalog import load_offer_catalog
++from coalition_travel.infrastructure.negotiation.journaling_oracle import (
++    JournalingNegotiationOracle,
++)
++from coalition_travel.infrastructure.negotiation.simulated_oracle import (
++    SimulatedNegotiationOracle,
++    SimulatedOracleConfig,
++)
++
++
++class SimulatedMarket:
++    """Public catalogue plus a factory of journaling negotiation sessions."""
++
++    def __init__(self, catalog: OfferCatalog, oracle: SimulatedNegotiationOracle):
++        if type(catalog) is not OfferCatalog:
++            raise TypeError("catalog must be an OfferCatalog")
++        if type(oracle) is not SimulatedNegotiationOracle:
++            raise TypeError("oracle must be a SimulatedNegotiationOracle")
++        self._catalog = catalog
++        self._oracle = oracle
++
++    @property
++    def catalog(self) -> OfferCatalog:
++        return self._catalog
++
++    @property
++    def reference_date(self) -> date:
++        return self._oracle.config.reference_date
++
++    @property
++    def oracle_configuration_id(self) -> str:
++        return self._oracle.oracle_configuration_id
++
++    def open_session(self) -> JournalingNegotiationOracle:
++        """A fresh journaling oracle for one lot; its journals start empty."""
++        return JournalingNegotiationOracle(self._oracle)
++
++
++def open_simulated_market(
++    catalog_path: str | Path,
++    reference_date: date,
++    config: SimulatedOracleConfig | None = None,
++) -> SimulatedMarket:
++    """Load the catalogue, build the seller simulator and return the public market."""
++    if isinstance(reference_date, datetime) or type(reference_date) is not date:
++        raise TypeError("reference_date must be a datetime.date")
++    if config is None:
++        config = SimulatedOracleConfig(reference_date=reference_date)
++    elif type(config) is not SimulatedOracleConfig:
++        raise TypeError("config must be a SimulatedOracleConfig")
++    elif config.reference_date != reference_date:
++        raise ValueError("config.reference_date differs from the market reference date")
++    catalog, terms_book = load_offer_catalog(catalog_path)
++    return SimulatedMarket(catalog, SimulatedNegotiationOracle(catalog, terms_book, config))
+diff -ruN -x __pycache__ -x *.egg-info a/tests/test_demand_pool.py b/tests/test_demand_pool.py
+--- a/tests/test_demand_pool.py	1970-01-01 01:00:00
++++ b/tests/test_demand_pool.py	2026-11-19 17:23:13
+@@ -0,0 +1,152 @@
++"""3H, I1: the versioned synthetic demand pool and its strict loader (plan ID-1, §6.3)."""
++
++import hashlib
++import json
++from collections import Counter
++from pathlib import Path
++
++import pytest
++from coalition_travel.application.lot_admissibility import lot_admissibility
++from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.travel_units import build_travel_unit
++from coalition_travel.application.trip_planning import route_key
++from coalition_travel.infrastructure.catalog.json_catalog import load_offer_catalog
++from coalition_travel.infrastructure.demand.demand_pool import DemandPoolError, load_demand_pool
++from p4_support import REFERENCE
++
++ROOT = Path(__file__).resolve().parents[1]
++POOL_PATH = ROOT / "data/demand/demand_pool_v1.jsonl"
++CATALOG_PATH = ROOT / "data/catalog/catalog_v1.json"
++POOL_SHA256 = "ef9513a057f2b7d1e87418a4f47ccc4879e4fcb6b5ed985e232119161679d476"
++LARGEST_TRAVELLER_REQUEST = 20  # TravelRequestDraft.travellers <= 20
++MAX_POOL_REQUESTS_PER_ROUTE = 13  # one component holds at most 14 units
++
++
++def pool_units():
++    return [
++        build_travel_unit(item.request_id, item.draft, REFERENCE)
++        for item in load_demand_pool(POOL_PATH).requests
++    ]
++
++
++def test_versioned_pool_loads_with_its_manifest():
++    pool = load_demand_pool(POOL_PATH)
++    assert hashlib.sha256(POOL_PATH.read_bytes()).hexdigest() == POOL_SHA256 == pool.sha256
++    assert (pool.version, pool.catalog_version) == ("demand-pool-v1", "catalog-v1")
++    assert [item.request_id for item in pool.requests] == [
++        "pool-tyo-01",
++        "pool-tyo-02",
++        "pool-tyo-03",
++        "pool-tyo-04",
++        "pool-rom-01",
++        "pool-rom-02",
++    ]
++    assert len(pool_units()) == 6  # every request is ready at the reference date
++
++
++def test_pool_respects_the_route_limit_and_h2_with_the_largest_traveller_request():
++    catalog, _ = load_offer_catalog(CATALOG_PATH)
++    units = pool_units()
++    routes = Counter(route_key(unit) for unit in units)
++    assert routes and max(routes.values()) <= MAX_POOL_REQUESTS_PER_ROUTE
++    for route in routes:
++        largest = build_travel_unit(
++            "user",
++            TravelRequestDraft(
++                destination=route, travellers=LARGEST_TRAVELLER_REQUEST, budget_per_person="900"
++            ),
++            REFERENCE,
++        )
++        lot = lot_admissibility(
++            [largest, *(unit for unit in units if route_key(unit) == route)], catalog, REFERENCE
++        )
++        assert lot.status == "optimizable", route
++        assert all(check.valid for check in lot.capacity_checks), route
++
++
++def write_pool(tmp_path, lines, **manifest_changes):
++    pool = tmp_path / "pool_v1.jsonl"
++    raw = ("".join(line + "\n" for line in lines)).encode("utf-8")
++    pool.write_bytes(raw)
++    manifest = {
++        "version": "test-pool",
++        "pool_file": pool.name,
++        "pool_sha256": hashlib.sha256(raw).hexdigest(),
++        "synthetic": True,
++        "catalog_version": "catalog-v1",
++        "requests": len(lines),
++        "purpose": "test",
++        "limitations": ["test"],
++    }
++    manifest.update(manifest_changes)
++    pool.with_suffix(".manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
++    return pool
++
++
++GOOD = '{"request_id":"pool-a","synthetic":true,"draft":{"destination":"Tokyo","travellers":1,"budget_per_person":"500"}}'
++
++
++def test_a_minimal_pool_loads(tmp_path):
++    pool = load_demand_pool(write_pool(tmp_path, [GOOD]))
++    assert [item.request_id for item in pool.requests] == ["pool-a"]
++
++
++@pytest.mark.parametrize(
++    ("line", "message"),
++    [
++        (GOOD.replace('"500"', "500.5"), "decimal number"),
++        (GOOD.replace('"500"', "NaN"), "constant"),
++        (GOOD.replace('"synthetic":true', '"synthetic":true,"synthetic":true'), "duplicate key"),
++        (GOOD.replace('"synthetic":true', '"synthetic":false'), "synthetic must be true"),
++        (GOOD.replace('"synthetic":true,', ""), "missing keys"),
++        (GOOD.replace('"synthetic":true', '"synthetic":true,"note":"x"'), "unknown keys"),
++        (GOOD.replace("pool-a", "user-1"), "request_id must match"),
++        (GOOD.replace("pool-a", "pool-A"), "request_id must match"),
++        (GOOD.replace('"travellers":1', '"travellers":0'), "invalid draft"),
++        (GOOD.replace('"travellers":1', '"travellers":1,"price":3'), "invalid draft"),
++        ('["not", "an", "object"]', "expected an object"),
++        ("{", "invalid JSON"),
++    ],
++)
++def test_malformed_pool_lines_are_refused(tmp_path, line, message):
++    with pytest.raises(DemandPoolError, match=message):
++        load_demand_pool(write_pool(tmp_path, [line]))
++
++
++def test_duplicate_identifiers_and_blank_lines_are_refused(tmp_path):
++    with pytest.raises(DemandPoolError, match="unique"):
++        load_demand_pool(write_pool(tmp_path, [GOOD, GOOD]))
++    with pytest.raises(DemandPoolError, match="invalid JSON"):
++        load_demand_pool(write_pool(tmp_path, [GOOD, "", GOOD.replace("pool-a", "pool-b")]))
++    with pytest.raises(DemandPoolError, match="empty"):
++        load_demand_pool(write_pool(tmp_path, []))
++
++
++@pytest.mark.parametrize(
++    ("changes", "message"),
++    [
++        ({"pool_sha256": "0" * 64}, "does not match the file"),
++        ({"pool_sha256": "ABC"}, "lowercase SHA-256"),
++        ({"requests": 2}, "requests count"),
++        ({"synthetic": False}, "synthetic must be true"),
++        ({"pool_file": "other.jsonl"}, "pool_file"),
++        ({"catalog_version": ""}, "catalog_version"),
++        ({"limitations": []}, "limitations"),
++        ({"extra": 1}, "unknown keys"),
++    ],
++)
++def test_manifest_inconsistencies_are_refused(tmp_path, changes, message):
++    with pytest.raises(DemandPoolError, match=message):
++        load_demand_pool(write_pool(tmp_path, [GOOD], **changes))
++
++
++def test_missing_manifest_and_invalid_utf8_are_refused(tmp_path):
++    pool = write_pool(tmp_path, [GOOD])
++    pool.with_suffix(".manifest.json").unlink()
++    with pytest.raises(DemandPoolError, match="missing demand pool manifest"):
++        load_demand_pool(pool)
++    pool.write_bytes(b"\xff\xfe")
++    with pytest.raises(DemandPoolError, match="UTF-8"):
++        load_demand_pool(pool)
++    with pytest.raises(DemandPoolError, match="cannot read"):
++        load_demand_pool(tmp_path / "absent.jsonl")
+diff -ruN -x __pycache__ -x *.egg-info a/tests/test_i1_python310_compatibility.py b/tests/test_i1_python310_compatibility.py
+--- a/tests/test_i1_python310_compatibility.py	1970-01-01 01:00:00
++++ b/tests/test_i1_python310_compatibility.py	2026-11-19 17:23:13
+@@ -0,0 +1,37 @@
++"""3H, I1: the new standard-library-only modules import under a real Python 3.10.
++
++Kept apart from tests/test_python310_compatibility.py so that I1 changes no existing test
++other than the allow-list entry of the market (acceptance criterion of plan step I1).
++The grammar of every new file is already checked by that module's whole-tree parse.
++"""
++
++import shutil
++import subprocess
++from pathlib import Path
++
++import pytest
++
++REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
++PYTHON310 = shutil.which("python3.10")
++I1_STDLIB_ONLY_MODULES = (
++    "coalition_travel.infrastructure.negotiation.journaling_oracle",
++    "coalition_travel.infrastructure.negotiation.market",
++)
++
++
++@pytest.mark.skipif(PYTHON310 is None, reason="python3.10 is not installed")
++def test_i1_standard_library_only_modules_import_under_python_3_10():
++    code = (
++        "import importlib, sys; "
++        f"sys.path.insert(0, {str(REPOSITORY_ROOT / 'Multi-Agent')!r}); "
++        f"[importlib.import_module(name) for name in {I1_STDLIB_ONLY_MODULES!r}]"
++    )
++    completed = subprocess.run(
++        [PYTHON310, "-I", "-B", "-c", code],
++        cwd=REPOSITORY_ROOT,
++        capture_output=True,
++        text=True,
++        timeout=60,
++        check=False,
++    )
++    assert completed.returncode == 0, completed.stderr
+diff -ruN -x __pycache__ -x *.egg-info a/tests/test_journaling_oracle.py b/tests/test_journaling_oracle.py
+--- a/tests/test_journaling_oracle.py	1970-01-01 01:00:00
++++ b/tests/test_journaling_oracle.py	2026-11-19 17:23:33
+@@ -0,0 +1,251 @@
++"""3H, I1: journaling adapter under the cache (plan §4.4) and market composition root."""
++
++from dataclasses import replace
++from datetime import date
++from decimal import Decimal
++from pathlib import Path
++
++import pytest
++from coalition_travel.application.negotiation_cache import CachingNegotiationOracle
++from coalition_travel.application.reference_costs import NegotiationOracleContractError
++from coalition_travel.domain.negotiation_request import negotiation_request_for
++from coalition_travel.domain.offer import OfferCatalog
++from coalition_travel.infrastructure.catalog.json_catalog import load_offer_catalog
++from coalition_travel.infrastructure.negotiation.journaling_oracle import (
++    JournalConsistencyError,
++    JournalingNegotiationOracle,
++    NonDeterministicJournalError,
++    check_journal_concordance,
++)
++from coalition_travel.infrastructure.negotiation.market import (
++    SimulatedMarket,
++    open_simulated_market,
++)
++from coalition_travel.infrastructure.negotiation.simulated_oracle import (
++    NegotiationSimulation,
++    SimulatedNegotiationOracle,
++    SimulatedOracleConfig,
++)
++from p4_support import REFERENCE, make_unit
++
++CATALOG_PATH = Path(__file__).resolve().parents[1] / "data/catalog/catalog_v1.json"
++
++
++@pytest.fixture(scope="module")
++def simulated():
++    catalog, terms = load_offer_catalog(CATALOG_PATH)
++    return catalog, SimulatedNegotiationOracle(catalog, terms, SimulatedOracleConfig(REFERENCE))
++
++
++def request_for(catalog, budget="520", seats=1, unit_id="u1"):
++    return negotiation_request_for(
++        (make_unit(unit_id, seats=seats, budget=budget),), catalog.get("tyo-northstar-20270310")
++    )
++
++
++class ScriptedOracle:
++    """Detailed oracle returning scripted simulations (or raising) in call order."""
++
++    def __init__(self, configuration, script):
++        self.oracle_configuration_id = configuration
++        self.script = list(script)
++        self.calls = 0
++
++    def negotiate_detailed(self, request):
++        self.calls += 1
++        item = self.script[min(self.calls, len(self.script)) - 1]
++        if isinstance(item, Exception):
++            raise item
++        return item
++
++
++def test_cache_miss_stores_one_canonical_journal_matching_the_outcome(simulated):
++    catalog, oracle = simulated
++    session = JournalingNegotiationOracle(oracle)
++    request = request_for(catalog)
++    outcome = session.negotiate(request)
++    assert outcome.status == "agreement"
++    assert session.oracle_calls == 1
++    assert list(session.journals) == [request.request_key]
++    journal = session.journal_for(request.request_key)
++    check_journal_concordance(journal, outcome)  # J2
++    assert (journal.request_key, journal.status, journal.agreed_total_cents) == (
++        outcome.request_key,
++        outcome.status,
++        outcome.agreed_total_cents,
++    )
++    assert journal.router_iterations == outcome.turns
++    assert journal.oracle_configuration_id == outcome.oracle_configuration_id
++
++
++def test_cache_hit_reuses_the_canonical_journal_without_calling_the_oracle(simulated):
++    catalog, oracle = simulated
++    session = JournalingNegotiationOracle(oracle)
++    cache = CachingNegotiationOracle(session)
++    request = request_for(catalog)
++    first = cache.negotiate(request)
++    journal = session.journal_for(request.request_key)
++    second = cache.negotiate(request)
++    assert second == first
++    assert session.oracle_calls == 1 and len(session.journals) == 1
++    assert cache.statistics.hits == 1 and cache.statistics.oracle_calls == 1
++    assert session.journal_for(request.request_key) is journal
++    check_journal_concordance(journal, second)  # J2 with the cached outcome
++
++
++def test_same_key_twice_without_cache_is_deduplicated(simulated):
++    catalog, oracle = simulated
++    session = JournalingNegotiationOracle(oracle)
++    request = request_for(catalog)
++    session.negotiate(request)
++    canonical = session.journal_for(request.request_key)
++    session.negotiate(request)
++    assert session.oracle_calls == 2
++    assert len(session.journals) == 1
++    assert session.journal_for(request.request_key) is canonical
++
++
++@pytest.mark.parametrize("change", ["journal_sha256", "outcome_and_journal_amount"])
++def test_same_key_twice_with_a_different_result_raises(simulated, change):
++    catalog, oracle = simulated
++    request = request_for(catalog)
++    real = oracle.negotiate_detailed(request)
++    if change == "journal_sha256":
++        other = NegotiationSimulation(real.outcome, replace(real.journal, journal_sha256="f" * 64))
++    else:  # still concordant, same journal digest field, but another outcome
++        amount = real.outcome.agreed_total_cents - 100
++        other = NegotiationSimulation(
++            replace(real.outcome, agreed_total_cents=amount),
++            replace(real.journal, agreed_total_cents=amount),
++        )
++    session = JournalingNegotiationOracle(
++        ScriptedOracle(oracle.oracle_configuration_id, [real, other])
++    )
++    session.negotiate(request)
++    with pytest.raises(NonDeterministicJournalError):
++        session.negotiate(request)
++    assert len(session.journals) == 1
++    assert session.journal_for(request.request_key) is real.journal
++
++
++def _tampered(journal, field):
++    if field == "request_key":
++        return replace(journal, request_key="0" * 64)
++    if field == "status":
++        return replace(
++            journal,
++            status="rejected",
++            terminal_reason="leader_counteroffers_exhausted",
++            agreed_total_cents=None,
++        )
++    if field == "amount":
++        return replace(journal, agreed_total_cents=journal.agreed_total_cents - 1)
++    if field == "configuration":
++        return replace(journal, oracle_configuration_id="another-configuration")
++    if field == "turns":
++        return replace(
++            journal, router_iterations=journal.router_iterations - 1, events=journal.events[:-1]
++        )
++    raise AssertionError(field)
++
++
++@pytest.mark.parametrize("field", ["request_key", "status", "amount", "configuration", "turns"])
++def test_an_inconsistent_journal_is_refused_and_nothing_is_stored(simulated, field):
++    catalog, oracle = simulated
++    request = request_for(catalog)
++    real = oracle.negotiate_detailed(request)
++    bad = NegotiationSimulation(real.outcome, _tampered(real.journal, field))
++    scripted = ScriptedOracle(oracle.oracle_configuration_id, [bad])
++    session = JournalingNegotiationOracle(scripted)
++    cache = CachingNegotiationOracle(session)
++    with pytest.raises(JournalConsistencyError):
++        cache.negotiate(request)
++    assert not session.journals
++    with pytest.raises(JournalConsistencyError):
++        cache.negotiate(request)  # no cache entry: the oracle is called again
++    assert scripted.calls == 2 and cache.statistics.hits == 0
++
++
++def test_an_outcome_violating_the_contract_leaves_no_orphan_journal(simulated):
++    catalog, oracle = simulated
++    request = request_for(catalog)
++    real = oracle.negotiate_detailed(request)
++    too_high = request.reservation_cents + 1
++    bad = NegotiationSimulation(
++        replace(real.outcome, agreed_total_cents=too_high),
++        replace(real.journal, agreed_total_cents=too_high),
++    )
++    scripted = ScriptedOracle(oracle.oracle_configuration_id, [bad])
++    session = JournalingNegotiationOracle(scripted)
++    cache = CachingNegotiationOracle(session)
++    with pytest.raises(NegotiationOracleContractError):
++        cache.negotiate(request)
++    assert not session.journals  # refused by the adapter before any storage
++    with pytest.raises(NegotiationOracleContractError):
++        cache.negotiate(request)
++    assert scripted.calls == 2
++
++
++def test_an_oracle_exception_leaves_no_journal_and_no_cache_entry(simulated):
++    catalog, oracle = simulated
++    scripted = ScriptedOracle(oracle.oracle_configuration_id, [RuntimeError("seller crashed")])
++    session = JournalingNegotiationOracle(scripted)
++    cache = CachingNegotiationOracle(session)
++    request = request_for(catalog)
++    for _ in range(2):
++        with pytest.raises(RuntimeError, match="seller crashed"):
++            cache.negotiate(request)
++    assert not session.journals and session.oracle_calls == 0 and scripted.calls == 2
++
++
++def test_a_rejected_negotiation_is_journaled_too(simulated):
++    catalog, oracle = simulated
++    session = JournalingNegotiationOracle(oracle)
++    request = request_for(catalog, budget="100")
++    outcome = session.negotiate(request)
++    assert outcome.status == "rejected" and outcome.agreed_total_cents is None
++    journal = session.journal_for(request.request_key)
++    assert journal.status == "rejected" and journal.terminal_reason is not None
++
++
++def test_configuration_identity_and_type_checks(simulated):
++    _, oracle = simulated
++    session = JournalingNegotiationOracle(oracle)
++    assert session.oracle_configuration_id == oracle.oracle_configuration_id
++    with pytest.raises(TypeError, match="negotiate_detailed"):
++        JournalingNegotiationOracle(type("NoDetail", (), {"oracle_configuration_id": "x"})())
++    with pytest.raises(TypeError, match="oracle_configuration_id"):
++        JournalingNegotiationOracle(object())
++    with pytest.raises(TypeError, match="NegotiationRequest"):
++        session.negotiate("not a request")
++    with pytest.raises(KeyError):
++        session.journal_for("0" * 64)
++    with pytest.raises(TypeError):
++        session.journals["k"] = None  # read-only view
++
++
++def test_market_opens_fresh_sessions_and_exposes_public_objects_only():
++    market = open_simulated_market(CATALOG_PATH, REFERENCE)
++    assert type(market) is SimulatedMarket
++    assert type(market.catalog) is OfferCatalog and market.reference_date == REFERENCE
++    first, second = market.open_session(), market.open_session()
++    assert first is not second
++    assert not first.journals and first.oracle_calls == 0
++    assert first.oracle_configuration_id == market.oracle_configuration_id
++    first.negotiate(request_for(market.catalog))
++    assert not second.journals  # sessions never share journals
++    public = {type(value).__name__ for value in vars(market).values()}
++    assert public == {"OfferCatalog", "SimulatedNegotiationOracle"}
++
++
++def test_market_refuses_an_inconsistent_configuration():
++    with pytest.raises(ValueError, match="reference_date"):
++        open_simulated_market(
++            CATALOG_PATH, REFERENCE, SimulatedOracleConfig(reference_date=date(2026, 11, 20))
++        )
++    with pytest.raises(TypeError):
++        open_simulated_market(CATALOG_PATH, "2026-11-19")
++    config = SimulatedOracleConfig(REFERENCE, seller_concession_rate=Decimal("0.05"))
++    custom = open_simulated_market(CATALOG_PATH, REFERENCE, config)
++    default = open_simulated_market(CATALOG_PATH, REFERENCE)
++    assert custom.oracle_configuration_id != default.oracle_configuration_id
+diff -ruN -x __pycache__ -x *.egg-info a/tests/test_offer_catalog.py b/tests/test_offer_catalog.py
+--- a/tests/test_offer_catalog.py	2026-11-19 06:54:01
++++ b/tests/test_offer_catalog.py	2026-11-19 17:20:24
+@@ -34,6 +34,9 @@
+     # P4 decision D8: the experimental scenario generator builds private terms and the
+     # oracle itself, and returns public objects only.
+     Path("coalition_travel/infrastructure/evaluation/formation_scenarios.py"),
++    # 3H, I1: composition root of the simulated market; it hands the terms book to the
++    # seller simulator only and returns the public catalogue and journaling sessions.
++    Path("coalition_travel/infrastructure/negotiation/market.py"),
+ )
+ GUARDED_NAMES = frozenset(
+     {
+@@ -420,6 +423,7 @@
+         Path("coalition_travel/infrastructure/catalog/json_catalog.py"),
+         Path("coalition_travel/infrastructure/negotiation/simulated_oracle.py"),
+         Path("coalition_travel/infrastructure/evaluation/formation_scenarios.py"),
++        Path("coalition_travel/infrastructure/negotiation/market.py"),
+     )
+ 
+ 
+diff -ruN -x __pycache__ -x *.egg-info a/tests/test_trip_planning.py b/tests/test_trip_planning.py
+--- a/tests/test_trip_planning.py	1970-01-01 01:00:00
++++ b/tests/test_trip_planning.py	2026-11-19 17:27:20
+@@ -0,0 +1,379 @@
++"""3H, I1: plan_lot over P2, P3 and P4 with one cache and one journaling session."""
++
++from dataclasses import fields, replace
++from pathlib import Path
++from types import MappingProxyType, SimpleNamespace
++
++import pytest
++from coalition_travel.application.coalition_formation import (
++    FormationConsistencyError,
++    FormationStages,
++    run_formation_pipeline,
++    run_formation_stages,
++)
++from coalition_travel.application.lot_admissibility import lot_admissibility
++from coalition_travel.application.negotiation_cache import (
++    CacheStatistics,
++    CachingNegotiationOracle,
++)
++from coalition_travel.application.reference_costs import compute_reference_costs
++from coalition_travel.application.request_contracts import TravelRequestDraft
++from coalition_travel.application.travel_units import build_travel_unit
++from coalition_travel.application.trip_planning import (
++    DemandPoolSnapshot,
++    PlanConsistencyError,
++    PlanningInput,
++    PlanningInputError,
++    PlanningRequest,
++    PoolRequestError,
++    TripPlan,
++    plan_lot,
++    verify_journal_invariants,
++)
++from coalition_travel.domain.negotiation_request import negotiation_request_for
++from coalition_travel.infrastructure.catalog.json_catalog import load_offer_catalog
++from coalition_travel.infrastructure.demand.demand_pool import load_demand_pool
++from coalition_travel.infrastructure.evaluation.formation_scenarios import (
++    ScenarioParameters,
++    build_scenario,
++)
++from coalition_travel.infrastructure.negotiation.journaling_oracle import (
++    JournalingNegotiationOracle,
++)
++from coalition_travel.infrastructure.negotiation.market import open_simulated_market
++from coalition_travel.infrastructure.negotiation.simulated_oracle import (
++    SimulatedNegotiationOracle,
++    SimulatedOracleConfig,
++)
++from p4_support import REFERENCE
++
++ROOT = Path(__file__).resolve().parents[1]
++CATALOG_PATH = ROOT / "data/catalog/catalog_v1.json"
++POOL_PATH = ROOT / "data/demand/demand_pool_v1.jsonl"
++
++# Drafts economically identical to the pinned lot of tests/test_coalition_formation.py.
++PINNED = {
++    "a": ("Tokyo", 1, "520"),
++    "b": ("Tokyo", 1, "540"),
++    "c": ("Tokyo", 2, "500"),
++    "d": ("Tokyo", 1, "600"),
++    "e": ("Rome", 2, "450"),
++    "f": ("Rome", 1, "330"),
++}
++
++
++def draft(destination="Tokyo", travellers=1, budget="520", **extra):
++    return TravelRequestDraft(
++        destination=destination, travellers=travellers, budget_per_person=budget, **extra
++    )
++
++
++def request(request_id, destination="Tokyo", travellers=1, budget="520", **extra):
++    return PlanningRequest(request_id, draft(destination, travellers, budget, **extra))
++
++
++def snapshot(requests, catalog_version="catalog-v1"):
++    return DemandPoolSnapshot("test-pool", "0" * 64, catalog_version, tuple(requests))
++
++
++def pinned_input():
++    """The pinned lot spans two routes: one focus request per route keeps all six units."""
++    focus = (request("a", *PINNED["a"]), request("e", *PINNED["e"]))
++    pool = snapshot(request(key, *value) for key, value in PINNED.items() if key not in "ae")
++    return PlanningInput(focus, pool, REFERENCE)
++
++
++def fresh_oracle():
++    catalog, terms = load_offer_catalog(CATALOG_PATH)
++    return catalog, SimulatedNegotiationOracle(catalog, terms, SimulatedOracleConfig(REFERENCE))
++
++
++@pytest.fixture(scope="module")
++def market():
++    return open_simulated_market(CATALOG_PATH, REFERENCE)
++
++
++@pytest.fixture(scope="module")
++def pinned_plan(market):
++    return plan_lot(pinned_input(), market)
++
++
++def test_pinned_lot_through_plan_lot_matches_the_pipeline_field_by_field(pinned_plan):
++    plan = pinned_plan
++    units = tuple(build_travel_unit(key, draft(*value), REFERENCE) for key, value in PINNED.items())
++    assert plan.units == units
++    catalog, oracle = fresh_oracle()
++    expected = run_formation_pipeline(units, catalog, REFERENCE, oracle)
++    formation = plan.formation
++    for field in fields(type(expected)):  # every field, for a precise diagnosis
++        assert getattr(formation, field.name) == getattr(expected, field.name), field.name
++    assert formation == expected
++    # The intermediate stages equal a direct computation with a fresh oracle.
++    lot = lot_admissibility(units, catalog, REFERENCE)
++    assert plan.stages.lot == lot
++    _, oracle = fresh_oracle()
++    assert plan.stages.references == compute_reference_costs(lot, CachingNegotiationOracle(oracle))
++
++
++def test_pinned_lot_keeps_its_pinned_values(pinned_plan):
++    formation = pinned_plan.formation
++    assert formation.status == "optimized"
++    assert [(b.unit_ids, b.offer_id, b.cost_cents, b.value_cents) for b in formation.blocks] == [
++        (("a", "b", "c"), "tyo-northstar-20270310", 187_200, 2_520),
++        (("d",), "tyo-skyways-20270312", 54_000, 0),
++        (("e", "f"), "rom-cloudwing-20270405", 81_000, 9_000),
++    ]
++    assert (
++        formation.total_reference_cents,
++        formation.total_cost_cents,
++        formation.total_value_cents,
++    ) == (333_720, 322_200, 11_520)
++    assert formation.cache_statistics.hits == 10
++
++
++def test_pinned_lot_satisfies_the_journal_invariants(pinned_plan):
++    stats = pinned_plan.formation.cache_statistics
++    invariants = pinned_plan.invariants
++    assert invariants.journals == invariants.oracle_calls == invariants.distinct_keys
++    assert invariants.oracle_calls == stats.oracle_calls
++    assert invariants.attempts == invariants.cache_requests == stats.requests
++    assert len(pinned_plan.journals) == stats.oracle_calls
++    for block in pinned_plan.formation.blocks:  # every retained agreement has its journal
++        cost = next(c for c in pinned_plan.formation.evaluations if c.unit_ids == block.unit_ids)
++        attempt = next(a for a in cost.attempts if a.offer_id == block.offer_id)
++        journal = pinned_plan.journal_for(attempt.request_key)
++        assert journal.agreed_total_cents == block.cost_cents
++        assert journal.offer_id == block.offer_id
++
++
++@pytest.mark.parametrize(
++    ("parameters", "seed"),
++    [
++        (ScenarioParameters(unit_count=6, offer_count=3, density_percent=50), 0),
++        (ScenarioParameters(unit_count=7), 4),
++        (ScenarioParameters(family="mutualisation", unit_count=6), 1),
++        (
++            ScenarioParameters(
++                family="h2_violation", tier_grid="flat", density_percent=100, unit_count=4
++            ),
++            0,
++        ),
++    ],
++)
++def test_journal_invariants_hold_on_exploratory_lots(tmp_path, parameters, seed):
++    scenario = build_scenario(parameters, seed, tmp_path)
++    session = JournalingNegotiationOracle(scenario.oracle)
++    stages = run_formation_stages(
++        scenario.units, scenario.catalog, scenario.reference_date, session
++    )
++    invariants = verify_journal_invariants(stages, session.journals, session.oracle_calls)
++    assert invariants.journals == invariants.oracle_calls == invariants.distinct_keys
++    assert invariants.attempts == invariants.cache_requests
++    # The stages wrapper and the journaling layer change nothing in the formation.
++    expected = run_formation_pipeline(
++        scenario.units, scenario.catalog, scenario.reference_date, scenario.oracle
++    )
++    assert stages.formation == expected
++
++
++def test_verify_journal_invariants_detects_each_violation(pinned_plan):
++    stages, journals = pinned_plan.stages, dict(pinned_plan.journals)
++    calls = pinned_plan.invariants.oracle_calls
++    key = next(iter(journals))
++    missing = {k: v for k, v in journals.items() if k != key}
++    with pytest.raises(PlanConsistencyError, match="J3: no journal"):
++        verify_journal_invariants(stages, missing, calls)
++    wrong = dict(journals)
++    wrong[key] = SimpleNamespace(**{**vars_of(journals[key]), "router_iterations": -1})
++    with pytest.raises(PlanConsistencyError, match="J3: attempt and journal disagree"):
++        verify_journal_invariants(stages, wrong, calls)
++    extra = {**journals, "f" * 64: journals[key]}
++    with pytest.raises(PlanConsistencyError, match="J4"):
++        verify_journal_invariants(stages, extra, calls)
++    with pytest.raises(PlanConsistencyError, match="J5: journals, oracle calls"):
++        verify_journal_invariants(stages, journals, calls + 1)
++    stats = stages.formation.cache_statistics
++    more_requests = CacheStatistics(stats.requests + 1, stats.hits + 1, stats.oracle_calls)
++    for statistics, message in ((more_requests, "attempts for"), (None, "no cache statistics")):
++        altered = replace(stages, formation=replace(stages.formation, cache_statistics=statistics))
++        with pytest.raises(PlanConsistencyError, match=f"J5: .*{message}"):
++            verify_journal_invariants(altered, journals, calls)
++
++
++def vars_of(journal):
++    names = ("request_key", "oracle_configuration_id", "status", "agreed_total_cents")
++    return {name: getattr(journal, name) for name in (*names, "router_iterations")}
++
++
++def test_versioned_pool_plan_is_pinned(market):
++    """Regression anchor computed once with the frozen pool v1, then pinned (report I1)."""
++    pool = load_demand_pool(POOL_PATH)
++    plan = plan_lot(PlanningInput((request("user", "Tokyo", 8, "500"),), pool, REFERENCE), market)
++    formation = plan.formation
++    assert plan.status == "planned"
++    assert plan.pool_unit_ids == ("pool-tyo-01", "pool-tyo-02", "pool-tyo-03", "pool-tyo-04")
++    assert [(b.unit_ids, b.offer_id, b.cost_cents, b.value_cents) for b in formation.blocks] == [
++        (
++            ("pool-tyo-01", "pool-tyo-02", "pool-tyo-04", "user"),
++            "tyo-northstar-20270310",
++            528_000,
++            9_000,
++        ),
++        (("pool-tyo-03",), "tyo-northstar-20270310", 90_720, 0),
++    ]
++    assert (
++        formation.total_reference_cents,
++        formation.total_cost_cents,
++        formation.total_value_cents,
++    ) == (627_720, 618_720, 9_000)
++    stats = formation.cache_statistics
++    assert (stats.requests, stats.hits, stats.oracle_calls) == (72, 10, 62)
++    assert (plan.pool_version, plan.pool_sha256) == (pool.version, pool.sha256)
++    assert (plan.catalog_version, plan.catalog_sha256) == ("catalog-v1", market.catalog.sha256)
++
++
++def test_plan_is_deterministic(market):
++    first, second = plan_lot(pinned_input(), market), plan_lot(pinned_input(), market)
++    assert first.formation.result_sha256 == second.formation.result_sha256
++    assert {k: j.journal_sha256 for k, j in first.journals.items()} == {
++        k: j.journal_sha256 for k, j in second.journals.items()
++    }
++
++
++def test_route_selection_keeps_only_pool_units_on_the_focus_routes(market):
++    pool = load_demand_pool(POOL_PATH)
++    tokyo = plan_lot(PlanningInput((request("user"),), pool, REFERENCE), market)
++    assert tokyo.pool_unit_ids == ("pool-tyo-01", "pool-tyo-02", "pool-tyo-03", "pool-tyo-04")
++    both = plan_lot(
++        PlanningInput((request("user"), request("user-2", "Rome", 1, "400")), pool, REFERENCE),
++        market,
++    )
++    assert both.pool_unit_ids == tuple(sorted(item.request_id for item in pool.requests))
++    assert both.focus_request_ids == ("user", "user-2")
++    assert both.lot_unit_ids == tuple(sorted([*both.pool_unit_ids, "user", "user-2"]))
++
++
++def test_capacity_model_violation_negotiates_nothing(market):
++    pool = load_demand_pool(POOL_PATH)
++    focus = (request("user", "Rome", 20, "400"), request("user-2", "Rome", 20, "400"))
++    plan = plan_lot(PlanningInput(focus, pool, REFERENCE), market)
++    assert plan.status == "planned"
++    assert plan.formation.status == "capacity_model_violated"
++    assert plan.stages.references is None
++    assert not plan.journals
++    assert (plan.invariants.attempts, plan.invariants.oracle_calls) == (0, 0)
++
++
++def test_unknown_destination_has_no_admissible_offer(market):
++    pool = load_demand_pool(POOL_PATH)
++    plan = plan_lot(PlanningInput((request("user", "Paris"),), pool, REFERENCE), market)
++    assert plan.pool_unit_ids == ()
++    assert plan.formation.status == "no_eligible_units"
++    assert [(u.unit_id, u.reason) for u in plan.formation.unserved] == [
++        ("user", "no_admissible_offer")
++    ]
++    assert not plan.journals
++
++
++def test_budget_below_every_floor_has_no_solo_reference(market):
++    pool = load_demand_pool(POOL_PATH)
++    plan = plan_lot(PlanningInput((request("user", "Tokyo", 1, "100"),), pool, REFERENCE), market)
++    assert ("user", "no_solo_reference") in [(u.unit_id, u.reason) for u in plan.formation.unserved]
++    user = next(r for r in plan.stages.references.unit_references if r.unit_id == "user")
++    assert user.attempts and all(a.status != "agreement" for a in user.attempts)
++    for attempt in user.attempts:  # the failed negotiations are journaled (J3)
++        assert plan.journal_for(attempt.request_key).status == attempt.status
++    assert all("user" not in block.unit_ids for block in plan.formation.blocks)
++
++
++def test_request_not_ready_is_rejected_without_negotiation(market):
++    pool = load_demand_pool(POOL_PATH)
++    incomplete = PlanningRequest("user", TravelRequestDraft(destination="Tokyo", travellers=2))
++    plan = plan_lot(PlanningInput((incomplete,), pool, REFERENCE), market)
++    assert plan.status == "request_rejected"
++    assert plan.stages is None and plan.formation is None and not plan.journals
++    (rejection,) = plan.rejections
++    assert (rejection.request_id, rejection.reason, rejection.status) == (
++        "user",
++        "request_not_ready",
++        "needs_clarification",
++    )
++    assert rejection.missing_fields == ("budget_per_person",)
++
++
++def test_planning_input_validation(market):
++    with pytest.raises(PlanningInputError, match="at least one focus"):
++        PlanningInput((), None, REFERENCE)
++    with pytest.raises(PlanningInputError, match="unique"):
++        PlanningInput((request("user"), request("user")), None, REFERENCE)
++    with pytest.raises(PlanningInputError, match="both focus and pool"):
++        PlanningInput((request("x"),), snapshot([request("x")]), REFERENCE)
++    with pytest.raises(PlanningInputError, match="stripped"):
++        PlanningRequest(" user", draft())
++    with pytest.raises(PlanningInputError, match="unique"):
++        snapshot([request("p"), request("p")])
++    other_day = PlanningInput((request("user"),), None, REFERENCE.replace(day=20))
++    with pytest.raises(PlanningInputError, match="reference dates"):
++        plan_lot(other_day, market)
++    with pytest.raises(PlanningInputError, match="targets catalog-v0"):
++        plan_lot(PlanningInput((request("user"),), snapshot([], "catalog-v0"), REFERENCE), market)
++
++
++def test_a_pool_request_that_cannot_become_a_unit_is_a_data_error(market):
++    past = request("pool-x", departure_after=REFERENCE.replace(year=2025))
++    with pytest.raises(PoolRequestError, match="pool-x"):
++        plan_lot(PlanningInput((request("user"),), snapshot([past]), REFERENCE), market)
++
++
++def test_trip_plan_status_and_stages_are_consistent(pinned_plan):
++    common = {
++        "focus_request_ids": ("a", "e"),
++        "units": (),
++        "pool_unit_ids": (),
++        "journals": MappingProxyType({}),
++        "invariants": None,
++        "reference_date": REFERENCE,
++        "catalog_version": "catalog-v1",
++        "catalog_sha256": "0" * 64,
++        "oracle_configuration_id": "x",
++        "pool_version": None,
++        "pool_sha256": None,
++    }
++    with pytest.raises(PlanConsistencyError):
++        TripPlan(status="planned", rejections=(), stages=None, **common)
++    with pytest.raises(PlanConsistencyError):
++        TripPlan(status="request_rejected", rejections=(), stages=None, **common)
++    with pytest.raises(PlanConsistencyError):
++        TripPlan(status="planned", rejections=("r",), stages=pinned_plan.stages, **common)
++
++
++def test_formation_stages_hold_references_exactly_outside_h2_violations(pinned_plan, market):
++    stages = pinned_plan.stages
++    with pytest.raises(FormationConsistencyError):
++        FormationStages(stages.lot, None, stages.formation)
++    pool = load_demand_pool(POOL_PATH)
++    focus = (request("user", "Rome", 20, "400"), request("user-2", "Rome", 20, "400"))
++    violated = plan_lot(PlanningInput(focus, pool, REFERENCE), market).stages
++    with pytest.raises(FormationConsistencyError):
++        FormationStages(violated.lot, stages.references, violated.formation)
++
++
++def test_a_session_that_is_not_fresh_is_refused(market):
++    used = market.open_session()
++    used.negotiate(
++        negotiation_request_for(
++            (build_travel_unit("x", draft(), REFERENCE),),
++            market.catalog.get("tyo-northstar-20270310"),
++        )
++    )
++
++    class ReusingMarket:
++        catalog = market.catalog
++        reference_date = market.reference_date
++        oracle_configuration_id = market.oracle_configuration_id
++
++        def open_session(self):
++            return used
++
++    with pytest.raises(PlanConsistencyError, match="start without journals"):
++        plan_lot(PlanningInput((request("user"),), None, REFERENCE), ReusingMarket())
+diff -ruN -x __pycache__ -x *.egg-info a/data/demand/demand_pool_v1.jsonl b/data/demand/demand_pool_v1.jsonl
+--- a/data/demand/demand_pool_v1.jsonl	1970-01-01 01:00:00
++++ b/data/demand/demand_pool_v1.jsonl	2026-11-19 17:20:01
+@@ -0,0 +1,6 @@
++{"request_id":"pool-tyo-01","synthetic":true,"draft":{"destination":"Tokyo","travellers":1,"budget_per_person":"520.00"}}
++{"request_id":"pool-tyo-02","synthetic":true,"draft":{"destination":"Tokyo","travellers":1,"budget_per_person":"540.00"}}
++{"request_id":"pool-tyo-03","synthetic":true,"draft":{"destination":"Tokyo","travellers":2,"budget_per_person":"500.00"}}
++{"request_id":"pool-tyo-04","synthetic":true,"draft":{"destination":"Tokyo","travellers":1,"budget_per_person":"600.00"}}
++{"request_id":"pool-rom-01","synthetic":true,"draft":{"destination":"Rome","travellers":2,"budget_per_person":"450.00"}}
++{"request_id":"pool-rom-02","synthetic":true,"draft":{"destination":"Rome","travellers":1,"budget_per_person":"330.00"}}
+diff -ruN -x __pycache__ -x *.egg-info a/data/demand/demand_pool_v1.manifest.json b/data/demand/demand_pool_v1.manifest.json
+--- a/data/demand/demand_pool_v1.manifest.json	1970-01-01 01:00:00
++++ b/data/demand/demand_pool_v1.manifest.json	2026-11-19 17:20:01
+@@ -0,0 +1,14 @@
++{
++  "version": "demand-pool-v1",
++  "pool_file": "demand_pool_v1.jsonl",
++  "pool_sha256": "ef9513a057f2b7d1e87418a4f47ccc4879e4fcb6b5ed985e232119161679d476",
++  "synthetic": true,
++  "catalog_version": "catalog-v1",
++  "requests": 6,
++  "purpose": "Fictional pending requests that a traveller's request joins in the 3H demonstration mode (plan 3H/P5, ID-1). Economically identical to the pinned catalogue v1 lot of tests/test_coalition_formation.py, so the pool is anchored to an existing regression result.",
++  "limitations": [
++    "Requests are fictional; they describe no real traveller.",
++    "Fixed before its first planning run (I1) and never tuned afterwards; any edit requires updating pool_sha256 here, and the loader refuses a mismatch.",
++    "At most 13 requests per route, and capacity margins chosen so that H2 holds with the largest admitted traveller request (20 seats) on every offer of catalog-v1."
++  ]
++}

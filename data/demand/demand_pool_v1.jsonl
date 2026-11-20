@@ -1,0 +1,6 @@
+{"request_id":"pool-tyo-01","synthetic":true,"draft":{"destination":"Tokyo","travellers":1,"budget_per_person":"520.00"}}
+{"request_id":"pool-tyo-02","synthetic":true,"draft":{"destination":"Tokyo","travellers":1,"budget_per_person":"540.00"}}
+{"request_id":"pool-tyo-03","synthetic":true,"draft":{"destination":"Tokyo","travellers":2,"budget_per_person":"500.00"}}
+{"request_id":"pool-tyo-04","synthetic":true,"draft":{"destination":"Tokyo","travellers":1,"budget_per_person":"600.00"}}
+{"request_id":"pool-rom-01","synthetic":true,"draft":{"destination":"Rome","travellers":2,"budget_per_person":"450.00"}}
+{"request_id":"pool-rom-02","synthetic":true,"draft":{"destination":"Rome","travellers":1,"budget_per_person":"330.00"}}

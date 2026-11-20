@@ -1,0 +1,14 @@
+{
+  "version": "demand-pool-v1",
+  "pool_file": "demand_pool_v1.jsonl",
+  "pool_sha256": "ef9513a057f2b7d1e87418a4f47ccc4879e4fcb6b5ed985e232119161679d476",
+  "synthetic": true,
+  "catalog_version": "catalog-v1",
+  "requests": 6,
+  "purpose": "Fictional pending requests that a traveller's request joins in the 3H demonstration mode (plan 3H/P5, ID-1). Economically identical to the pinned catalogue v1 lot of tests/test_coalition_formation.py, so the pool is anchored to an existing regression result.",
+  "limitations": [
+    "Requests are fictional; they describe no real traveller.",
+    "Fixed before its first planning run (I1) and never tuned afterwards; any edit requires updating pool_sha256 here, and the loader refuses a mismatch.",
+    "At most 13 requests per route, and capacity margins chosen so that H2 holds with the largest admitted traveller request (20 seats) on every offer of catalog-v1."
+  ]
+}

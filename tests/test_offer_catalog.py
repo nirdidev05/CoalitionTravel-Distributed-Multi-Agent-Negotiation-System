@@ -30,6 +30,13 @@ SOURCE_ROOT = REPOSITORY_ROOT / "Multi-Agent"
 FLOOR_ALLOW_LIST = (
     Path("coalition_travel/domain/offer.py"),
     Path("coalition_travel/infrastructure/catalog/json_catalog.py"),
+    Path("coalition_travel/infrastructure/negotiation/simulated_oracle.py"),
+    # P4 decision D8: the experimental scenario generator builds private terms and the
+    # oracle itself, and returns public objects only.
+    Path("coalition_travel/infrastructure/evaluation/formation_scenarios.py"),
+    # 3H, I1: composition root of the simulated market; it hands the terms book to the
+    # seller simulator only and returns the public catalogue and journaling sessions.
+    Path("coalition_travel/infrastructure/negotiation/market.py"),
 )
 GUARDED_NAMES = frozenset(
     {
@@ -407,6 +414,17 @@ def test_floor_guard_detects_imports_attributes_and_aliases(source):
 def test_floor_guard_ignores_unrelated_names():
     source = "from decimal import ROUND_FLOOR\nimport math\nvalue = math.floor(2.5)"
     assert not _referenced_names(ast.parse(source)) & GUARDED_NAMES
+
+
+def test_floor_allow_list_contains_exactly_the_reviewed_modules():
+    """Any future addition must change this test explicitly (decision D8)."""
+    assert FLOOR_ALLOW_LIST == (
+        Path("coalition_travel/domain/offer.py"),
+        Path("coalition_travel/infrastructure/catalog/json_catalog.py"),
+        Path("coalition_travel/infrastructure/negotiation/simulated_oracle.py"),
+        Path("coalition_travel/infrastructure/evaluation/formation_scenarios.py"),
+        Path("coalition_travel/infrastructure/negotiation/market.py"),
+    )
 
 
 def test_only_allow_listed_modules_touch_private_seller_floors():

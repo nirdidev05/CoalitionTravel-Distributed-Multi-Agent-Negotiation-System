@@ -15,6 +15,7 @@ from coalition_travel.domain.request import TravelRequestDraft
 from coalition_travel.infrastructure.llm.ollama import (
     LLMProviderError,
     OllamaStructuredRequestExtractor,
+    transport_schema,
 )
 from evaluate_requests import (
     DEFAULT_DATASET,
@@ -61,7 +62,7 @@ def test_ollama_adapter_sends_json_schema_and_validates_response(monkeypatch):
     assert result.destination == "Tokyo"
     assert result.arrival_before == date(2027, 2, 20)
     assert received["url"] == "http://localhost:11434/api/chat"
-    assert received["body"]["format"] == TravelRequestDraft.model_json_schema()
+    assert received["body"]["format"] == transport_schema()  # final mission: all keys required
     assert received["body"]["options"]["temperature"] == 0
     assert received["body"]["stream"] is False
     assert reference_date.isoformat() in received["body"]["messages"][1]["content"]
@@ -305,3 +306,26 @@ def test_ollama_adapter_limits_input_size():
 
     with pytest.raises(RequestInputError, match="exceeds"):
         asyncio.run(extractor.extract("six chars", date(2026, 1, 1)))
+
+
+def test_the_transport_schema_requires_every_key_and_changes_nothing_else():
+    """Final mission: without required keys, constrained decoding let models omit fields."""
+    pydantic_schema = TravelRequestDraft.model_json_schema()
+    sent = transport_schema()
+    assert sent["required"] == list(sent["properties"])
+    for name, node in sent["$defs"].items():
+        if node.get("type") == "object":
+            assert node["required"] == list(node["properties"]), name
+
+    def without_required(schema):
+        stripped = {key: value for key, value in schema.items() if key != "required"}
+        stripped["$defs"] = {
+            name: {key: value for key, value in node.items() if key != "required"}
+            for name, node in schema["$defs"].items()
+        }
+        return stripped
+
+    assert without_required(sent) == without_required(pydantic_schema)
+    assert "required" not in pydantic_schema  # the Pydantic model itself is unchanged
+    for name, node in pydantic_schema["$defs"].items():  # existing requirements are kept
+        assert set(node.get("required", ())) <= set(sent["$defs"][name]["required"])

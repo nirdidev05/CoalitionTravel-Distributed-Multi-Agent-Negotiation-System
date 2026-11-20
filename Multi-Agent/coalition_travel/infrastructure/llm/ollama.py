@@ -1,7 +1,9 @@
 """Local Ollama adapter for schema-constrained travel request extraction."""
 
 import asyncio
+import copy
 import json
+import re
 from datetime import date, datetime
 from math import isfinite
 from urllib.error import HTTPError, URLError
@@ -19,6 +21,35 @@ from coalition_travel.application.request_understanding import (
 
 # v2 (I4, D-I4-12): the schema gained the route fields, so the prompt is versioned with it.
 EXTRACTION_PROMPT_VERSION = "travel-request-extraction-v2"
+
+
+# How the Pydantic schema is sent to Ollama (final mission, LLM evaluation). The Pydantic
+# schema lists no required key because every field has a default; under constrained
+# decoding a model may then omit keys, and it was measured omitting destination and
+# budget. The transport schema requires every key (nullable fields still accept null);
+# the response is validated by the unchanged Pydantic model.
+SCHEMA_TRANSPORT_VERSION = "all-keys-required-v1"
+
+
+def transport_schema() -> dict:
+    schema = copy.deepcopy(TravelRequestDraft.model_json_schema())
+    for node in (schema, *schema.get("$defs", {}).values()):
+        if node.get("type") == "object" and "properties" in node:
+            node["required"] = list(node["properties"])
+    return schema
+
+
+# Security review S1 (final mission): data may not open or close the delimited blocks.
+_DELIMITER_TAG = re.compile(r"<\s*/?\s*(knowledge_context|request)\s*>", re.IGNORECASE)
+
+
+def _neutralise_delimiters(text: str) -> str:
+    """Replace any <request> or <knowledge_context> tag found in data by an inert marker.
+
+    Text without such a tag is returned unchanged, so the prompt bytes of ordinary
+    requests do not change.
+    """
+    return _DELIMITER_TAG.sub(lambda match: f"[{match.group(1).lower()} tag removed]", text)
 
 
 class LLMProviderError(RequestProviderError):
@@ -128,10 +159,10 @@ class OllamaStructuredRequestExtractor:
         user_prompt = (
             f"Reference date: {reference_date.isoformat()}\n"
             "<knowledge_context>\n"
-            f"{knowledge_context}\n"
+            f"{_neutralise_delimiters(knowledge_context)}\n"
             "</knowledge_context>\n"
             "Extract this request:\n<request>\n"
-            f"{text}\n"
+            f"{_neutralise_delimiters(text)}\n"
             "</request>"
         )
         payload = {
@@ -140,7 +171,7 @@ class OllamaStructuredRequestExtractor:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "format": TravelRequestDraft.model_json_schema(),
+            "format": transport_schema(),
             "options": {
                 "temperature": self.temperature,
                 **({"seed": self.seed} if self.seed is not None else {}),

@@ -1,6 +1,7 @@
 # I4 : Lyon-Alger, catalogue v2 et référentiel des lieux — rapport de livraison
 
-**Statut :** I4 livrée en entier (I4-A, I4-B et I4-C), en attente de revue.
+**Statut :** I4 livrée en entier (I4-A, I4-B et I4-C) et **clôturée le 2026-11-20**, après
+reformulation du critère I4-A2, acceptée en revue : voir le §7.2.
 
 **Historique de l'autorisation :**
 
@@ -54,7 +55,9 @@ touchés.
   - **les sorties de la commande sur E3 sont identiques octet pour octet à celles
     d'I3 :** sortie standard et sortie d'erreur, en JSON et en texte, comparées aux
     empreintes relevées à l'essai d'installation d'I3.
-- **L'empreinte exploratoire P4 `997109ee…`** est régénérée : voir le §7.2.
+- **L'empreinte exploratoire P4** ne peut plus être `997109ee…` avec le code d'I4, par
+  construction. Les résultats métier sont identiques sur les 1 740 enregistrements :
+  voir le §7.2. L'empreinte de performance `3024fef1…` est reproduite telle quelle.
 
 ---
 
@@ -252,27 +255,95 @@ Environnement : Python 3.14.2 du `.venv`, macOS, arm64. `/opt/homebrew/bin` est 
 | Après I4-B | 961 passed |
 | `PYTHONHASHSEED=0 python -m pytest -q`, livraison | **976 passed** : 882 tests de la base et 94 nouveaux (29 + 50 + 15), aucun saut |
 | `PYTHONHASHSEED=2 python -m pytest -q`, livraison | **976 passed** |
-| Python 3.10 | le contrôle de grammaire 3.10 couvre les fichiers nouveaux et modifiés ; il passe |
+| Python 3.10, grammaire | le contrôle de grammaire 3.10 couvre les fichiers nouveaux et modifiés ; il passe. Ce contrôle est **syntaxique** : il ne vaut pas exécution de la suite sous 3.10 |
+| Python 3.10, suite complète (ajout du 2026-11-20) | **anomalie ouverte, non validée :** 972 passed et 4 failed. Voir `docs/FINAL_PROJECT_AUDIT.md`, §5 |
 | `ruff check` et `ruff format --check` sur les 27 fichiers Python créés ou modifiés | All checks passed ; 27 already formatted |
 | `git diff --check` | propre |
 | Mutants d'I3 rejoués contre le code d'I4 | I3-A : 16 sur 16 tués ; I3-B et I3-C : 15 sur 15. La ligne visée par le mutant 8 a dû être mise à jour, parce que `not_validated_document` reçoit maintenant le paramètre `schema` |
 | Golden master, tests de `process_travel_request` | inclus dans la suite, inchangés, verts |
 
-### 7.2 L'empreinte exploratoire P4
+### 7.2 Les empreintes P4
 
-**En cours au moment de ce commit.** La régénération a été lancée le 2026-11-20 à 05:08,
-sur le code final d'I4, avec la commande d'I1 :
+*Section réécrite le 2026-11-20. Le texte initial disait « En cours au moment de ce
+commit ».*
+
+**Le constat.** Régénérée avec le code d'I4, la strate exploratoire ne donne plus la
+référence historique.
+
+| Exécution (`evaluate_formation.py exploratory`, `PYTHONHASHSEED=0`) | SHA-256 de `results.json` |
+|---|---|
+| Référence historique (`docs/p4_results/README.md`) | `997109eee5a9ee4c6567410066730e2f8b5c8dd01bd46ff958b586f4c33eced4` |
+| Code de la base d'I4 (copie vérifiée par le manifeste), régénéré le 2026-11-20 | `997109eee5a9ee4c6567410066730e2f8b5c8dd01bd46ff958b586f4c33eced4` : identique |
+| Code d'I4, régénéré le 2026-11-20 | `8988a1be89bf22ec7d5ea34dee1181088f93df6d5a71f24c37dfc1e4dd6eae2a` |
+
+**La cause est démontrée dans le code.** C'est une chaîne de dépendances voulue :
+
+```
+code_sha256  →  oracle_configuration_id  →  formation_run_id  →  result_sha256
+```
+
+- `code_sha256` (`simulated_oracle._agent_source_hashes`) hache les octets source de
+  12 modules. Quatre d'entre eux sont modifiés par I4 : `domain/negotiation_request.py`,
+  `domain/offer.py`, `domain/travel_unit.py` et
+  `infrastructure/catalog/json_catalog.py`.
+- `oracle_configuration_id` contient `code_sha256`.
+- `formation_run_id` (`coalition_formation`) hache `oracle_configuration_id`.
+- `result_sha256` hache `formation_run_id`.
+
+Toute modification de l'un de ces 12 modules change donc l'empreinte, quels que soient
+les résultats calculés. La demande du périmètre (K1 : « reproduire `997109ee…` ») ne
+pouvait pas tenir une fois ces fichiers modifiés.
+
+**La preuve d'équivalence.** Les deux `results.json` ont été comparés champ par champ :
+
+- 1 740 enregistrements de chaque côté ;
+- **seuls deux champs diffèrent, `formation_run_id` et `result_sha256`,** dans 1 720
+  enregistrements. Les 20 autres sont au statut `capacity_model_violated` : sans
+  formation, ils ne portent pas ces champs ;
+- tous les autres champs sont identiques dans les 1 740 enregistrements : coûts,
+  références, économies, décomposition, coalitions, tailles, compteurs d'oracle et de
+  cache, statuts, baselines et tableaux ;
+- `report.md` est identique octet pour octet entre les deux exécutions, et à
+  `docs/p4_results/exploratory_report.md`.
+
+**Le critère I4-A2 est reformulé.** La revue a accepté cette reformulation le
+2026-11-20 :
+
+> I4-A2 : sur la strate exploratoire, les résultats métier du code d'I4 sont identiques
+> à ceux du code de la base. La comparaison porte sur tous les champs, sauf les deux
+> champs de provenance `formation_run_id` et `result_sha256`. Le rapport Markdown est
+> identique octet pour octet.
+
+- `997109eee5a9ee4c6567410066730e2f8b5c8dd01bd46ff958b586f4c33eced4` reste la
+  référence historique. Elle n'est pas modifiée.
+- `8988a1be89bf22ec7d5ea34dee1181088f93df6d5a71f24c37dfc1e4dd6eae2a` est l'empreinte
+  propre au code d'I4.
+- Le code de P4 et le mécanisme d'empreinte ne sont pas modifiés.
+
+**L'empreinte de performance, vérifiée séparément.** La décision n'a pas été transposée
+d'office. La strate `performance` a été régénérée avec les deux codes :
+
+| Exécution | SHA-256 de `results.json` |
+|---|---|
+| Référence historique | `3024fef1187ece03e97c4da3391b2bb9e7c458f8346fad007402dc29310b0b85` |
+| Code de la base | `3024fef1187ece03e97c4da3391b2bb9e7c458f8346fad007402dc29310b0b85` |
+| Code d'I4 | `3024fef1187ece03e97c4da3391b2bb9e7c458f8346fad007402dc29310b0b85` |
+
+Cette strate est reproduite telle quelle, avec 0 champ différent sur 60 enregistrements.
+Ses enregistrements ne contiennent ni `formation_run_id` ni `result_sha256`. La
+reformulation ne s'y applique pas.
+
+**Commandes.** Dans une copie de la base, puis à la racine du dépôt :
 
 ```
 PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 PYTHONPATH=Multi-Agent \
   python Multi-Agent/evaluate_formation.py exploratory --output <répertoire temporaire>
+PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 PYTHONPATH=Multi-Agent \
+  python Multi-Agent/evaluate_formation.py performance --output <répertoire temporaire>
 ```
 
-Elle dure environ 23 minutes. Son résultat sera ajouté ici par un commit de suivi :
-
-- le SHA-256 de `results.json`, à comparer à
-  `997109eee5a9ee4c6567410066730e2f8b5c8dd01bd46ff958b586f4c33eced4` ;
-- la comparaison de `exploratory_report.md` avec `docs/p4_results/exploratory_report.md`.
+Les `results.json` ne sont pas versionnés : les catalogues générés contiennent des
+termes vendeurs privés (voir `docs/p4_results/README.md`).
 
 ### 7.3 Mutants
 
@@ -339,7 +410,7 @@ des remplacements dans les fichiers modifiés.
 | Critère | État |
 |---|---|
 | I4-A1 | **Atteint :** Lyon-Alger, sous forme structurée, produit une proposition v2 complète (§2) |
-| I4-A2 | voir le §7.2 pour `997109ee…`. Les autres empreintes figées et les sorties d'I3 sont identiques |
+| I4-A2 | **Atteint, dans sa formulation reformulée (§7.2) :** résultats métier exploratoires identiques à ceux du code de la base, hors `formation_run_id` et `result_sha256` ; empreinte de performance `3024fef1…` reproduite telle quelle ; autres empreintes figées et sorties d'I3 identiques |
 | I4-A3 | **Atteint :** K2 à K10 |
 | I4-A4 | **Atteint :** C1 à C6 et H-forfait au chargement, avec les refus listés |
 | I4-A5 | **Atteint :** un test par règle et par motif v2 |
@@ -350,4 +421,14 @@ des remplacements dans les fichiers modifiés.
 | I4-A10 | **Atteint :** données figées avant toute planification, jamais retouchées |
 | I4-A11 | voir le §7.1 ; mutants : 20 sur 20 |
 
-**Prochaine étape :** revue d'I4, et décision sur les huit points du §6.
+**I4 est clôturée** (2026-11-20) : ses critères I4-A1 à I4-A11 sont atteints. Les
+huit points du §6 n'ont pas reçu de décision explicite en revue ; aucun ne change un
+critère. Reste une anomalie, ouverte hors du périmètre d'I4 : l'exécution de la
+suite complète sous Python 3.10 (§7.1).
+
+**Revérification du 2026-11-20 (mission finale) :**
+
+- 976 passed avec `PYTHONHASHSEED=0` et `2` ;
+- les 20 mutants d'I4 rejoués, 20 tués ;
+- Lyon-Alger exécuté de bout en bout avec la commande installée : code 0, statut
+  `served_in_coalition`, économie de 46,17 €.

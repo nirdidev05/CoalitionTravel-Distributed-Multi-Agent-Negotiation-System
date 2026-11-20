@@ -1,0 +1,59 @@
+[
+  {
+    "destination": "Tokyo",
+    "travellers": null,
+    "budget_per_person": "500",
+    "currency": "EUR",
+    "departure_after": "2027-01-15",
+    "arrival_before": null,
+    "direct_flight": "preferred",
+    "excluded_suppliers": [],
+    "profiles": [],
+    "origin": null,
+    "trip_type": null,
+    "departure_before": null,
+    "return_after": null,
+    "return_before": null
+  },
+  {
+    "destination": "Tokyo",
+    "travellers": 2,
+    "budget_per_person": "500",
+    "currency": "EUR",
+    "departure_after": "2027-01-15",
+    "arrival_before": null,
+    "direct_flight": "preferred",
+    "excluded_suppliers": [],
+    "profiles": [
+      {
+        "profile_id": "p1",
+        "traveller_count": 1,
+        "budget_per_person": "500",
+        "departure_after": "2027-01-15",
+        "arrival_before": null,
+        "direct_flight": "preferred",
+        "excluded_suppliers": null,
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      },
+      {
+        "profile_id": "p2",
+        "traveller_count": 1,
+        "budget_per_person": "500",
+        "departure_after": "2027-01-15",
+        "arrival_before": null,
+        "direct_flight": "preferred",
+        "excluded_suppliers": null,
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      }
+    ],
+    "origin": null,
+    "trip_type": null,
+    "departure_before": null,
+    "return_after": null,
+    "return_before": null
+  }
+]

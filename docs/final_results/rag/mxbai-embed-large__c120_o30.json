@@ -1,0 +1,3347 @@
+{
+  "indexing_seconds": 1.5366822080031852,
+  "indexed_documents": 12,
+  "indexed_chunks": 35,
+  "sweeps": [
+    {
+      "top_k": 1,
+      "min_score": 0.0,
+      "summary": {
+        "precision": 1.0,
+        "recall": 0.875,
+        "reciprocal_rank": 1.0,
+        "ndcg": 1.0,
+        "latency_ms": 57.74572916683004
+      },
+      "by_domain": {
+        "business_knowledge": {
+          "precision": 1.0,
+          "recall": 0.75,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 56.30618750001304
+        },
+        "negotiation_knowledge": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 58.4754477495153
+        },
+        "supplier_knowledge": {
+          "precision": 1.0,
+          "recall": 0.875,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 58.45555225096177
+        }
+      },
+      "errors": 0,
+      "queries": [
+        {
+          "query_id": "q-business-eligibility",
+          "domain": "business_knowledge",
+          "query_type": "eligibility",
+          "latency_ms": 57.52724999911152,
+          "precision": 1.0,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-business-profiles",
+          "domain": "business_knowledge",
+          "query_type": "profile-segmentation",
+          "latency_ms": 55.86283400043612,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-budget-unit",
+          "domain": "business_knowledge",
+          "query_type": "budget-interpretation",
+          "latency_ms": 56.0246660024859,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-live-availability",
+          "domain": "business_knowledge",
+          "query_type": "availability",
+          "latency_ms": 55.80999999801861,
+          "precision": 1.0,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-supplier-direct",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-feature",
+          "latency_ms": 59.78825000056531,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-exclusion",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-constraint",
+          "latency_ms": 61.42691700370051,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-date-change",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 55.37504199310206,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-baggage",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 57.23200000647921,
+          "precision": 1.0,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-negotiation-turn-limit",
+          "domain": "negotiation_knowledge",
+          "query_type": "protocol",
+          "latency_ms": 58.404832998348866,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-cap",
+          "domain": "negotiation_knowledge",
+          "query_type": "budget-cap",
+          "latency_ms": 56.064041003992315,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-payments",
+          "domain": "negotiation_knowledge",
+          "query_type": "allocation",
+          "latency_ms": 59.44341699796496,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-isolation",
+          "domain": "negotiation_knowledge",
+          "query_type": "broker-cohort",
+          "latency_ms": 59.98949999775505,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        }
+      ]
+    },
+    {
+      "top_k": 1,
+      "min_score": 0.3,
+      "summary": {
+        "precision": 1.0,
+        "recall": 0.875,
+        "reciprocal_rank": 1.0,
+        "ndcg": 1.0,
+        "latency_ms": 57.33952791585276
+      },
+      "by_domain": {
+        "business_knowledge": {
+          "precision": 1.0,
+          "recall": 0.75,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 56.46763549884781
+        },
+        "negotiation_knowledge": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 57.71640649800247
+        },
+        "supplier_knowledge": {
+          "precision": 1.0,
+          "recall": 0.875,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 57.83454175070801
+        }
+      },
+      "errors": 0,
+      "queries": [
+        {
+          "query_id": "q-business-eligibility",
+          "domain": "business_knowledge",
+          "query_type": "eligibility",
+          "latency_ms": 55.72937499528052,
+          "precision": 1.0,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-business-profiles",
+          "domain": "business_knowledge",
+          "query_type": "profile-segmentation",
+          "latency_ms": 55.90129199845251,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-budget-unit",
+          "domain": "business_knowledge",
+          "query_type": "budget-interpretation",
+          "latency_ms": 58.0679160048021,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-live-availability",
+          "domain": "business_knowledge",
+          "query_type": "availability",
+          "latency_ms": 56.17195899685612,
+          "precision": 1.0,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-supplier-direct",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-feature",
+          "latency_ms": 59.63916600012453,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-exclusion",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-constraint",
+          "latency_ms": 59.455167000123765,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-date-change",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 55.14337500062538,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-baggage",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 57.10045900195837,
+          "precision": 1.0,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-negotiation-turn-limit",
+          "domain": "negotiation_knowledge",
+          "query_type": "protocol",
+          "latency_ms": 55.97012499492848,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-cap",
+          "domain": "negotiation_knowledge",
+          "query_type": "budget-cap",
+          "latency_ms": 55.75624999619322,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-payments",
+          "domain": "negotiation_knowledge",
+          "query_type": "allocation",
+          "latency_ms": 59.53041699831374,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-isolation",
+          "domain": "negotiation_knowledge",
+          "query_type": "broker-cohort",
+          "latency_ms": 59.60883400257444,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        }
+      ]
+    },
+    {
+      "top_k": 1,
+      "min_score": 0.5,
+      "summary": {
+        "precision": 1.0,
+        "recall": 0.875,
+        "reciprocal_rank": 1.0,
+        "ndcg": 1.0,
+        "latency_ms": 56.88587149901044
+      },
+      "by_domain": {
+        "business_knowledge": {
+          "precision": 1.0,
+          "recall": 0.75,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 55.54161425061466
+        },
+        "negotiation_knowledge": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 57.24797924631275
+        },
+        "supplier_knowledge": {
+          "precision": 1.0,
+          "recall": 0.875,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 57.86802100010391
+        }
+      },
+      "errors": 0,
+      "queries": [
+        {
+          "query_id": "q-business-eligibility",
+          "domain": "business_knowledge",
+          "query_type": "eligibility",
+          "latency_ms": 55.787290999433026,
+          "precision": 1.0,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-business-profiles",
+          "domain": "business_knowledge",
+          "query_type": "profile-segmentation",
+          "latency_ms": 55.47862499952316,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-budget-unit",
+          "domain": "business_knowledge",
+          "query_type": "budget-interpretation",
+          "latency_ms": 55.686541003524326,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-live-availability",
+          "domain": "business_knowledge",
+          "query_type": "availability",
+          "latency_ms": 55.213999999978114,
+          "precision": 1.0,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-supplier-direct",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-feature",
+          "latency_ms": 59.66541700036032,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-exclusion",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-constraint",
+          "latency_ms": 59.302374997059815,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-date-change",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 55.79237500205636,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-baggage",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 56.71191700093914,
+          "precision": 1.0,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-negotiation-turn-limit",
+          "domain": "negotiation_knowledge",
+          "query_type": "protocol",
+          "latency_ms": 55.476249995990656,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-cap",
+          "domain": "negotiation_knowledge",
+          "query_type": "budget-cap",
+          "latency_ms": 55.05508399801329,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-payments",
+          "domain": "negotiation_knowledge",
+          "query_type": "allocation",
+          "latency_ms": 59.28574999416014,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-isolation",
+          "domain": "negotiation_knowledge",
+          "query_type": "broker-cohort",
+          "latency_ms": 59.174832997086924,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        }
+      ]
+    },
+    {
+      "top_k": 1,
+      "min_score": 0.6,
+      "summary": {
+        "precision": 1.0,
+        "recall": 0.875,
+        "reciprocal_rank": 1.0,
+        "ndcg": 1.0,
+        "latency_ms": 57.10083008367898
+      },
+      "by_domain": {
+        "business_knowledge": {
+          "precision": 1.0,
+          "recall": 0.75,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 55.471333749665064
+        },
+        "negotiation_knowledge": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 57.37042699911399
+        },
+        "supplier_knowledge": {
+          "precision": 1.0,
+          "recall": 0.875,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 58.46072950225789
+        }
+      },
+      "errors": 0,
+      "queries": [
+        {
+          "query_id": "q-business-eligibility",
+          "domain": "business_knowledge",
+          "query_type": "eligibility",
+          "latency_ms": 55.30145899683703,
+          "precision": 1.0,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-business-profiles",
+          "domain": "business_knowledge",
+          "query_type": "profile-segmentation",
+          "latency_ms": 55.22158399980981,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-budget-unit",
+          "domain": "business_knowledge",
+          "query_type": "budget-interpretation",
+          "latency_ms": 55.517875000077765,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-live-availability",
+          "domain": "business_knowledge",
+          "query_type": "availability",
+          "latency_ms": 55.84441700193565,
+          "precision": 1.0,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-supplier-direct",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-feature",
+          "latency_ms": 61.31100000493461,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-exclusion",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-constraint",
+          "latency_ms": 58.87270899984287,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-date-change",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 54.87066700152354,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-baggage",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 58.78854200273054,
+          "precision": 1.0,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-negotiation-turn-limit",
+          "domain": "negotiation_knowledge",
+          "query_type": "protocol",
+          "latency_ms": 55.59954099589959,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-cap",
+          "domain": "negotiation_knowledge",
+          "query_type": "budget-cap",
+          "latency_ms": 55.72187500365544,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-payments",
+          "domain": "negotiation_knowledge",
+          "query_type": "allocation",
+          "latency_ms": 59.249208999972325,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-isolation",
+          "domain": "negotiation_knowledge",
+          "query_type": "broker-cohort",
+          "latency_ms": 58.9110829969286,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        }
+      ]
+    },
+    {
+      "top_k": 1,
+      "min_score": 0.7,
+      "summary": {
+        "precision": 0.9166666666666666,
+        "recall": 0.7916666666666666,
+        "reciprocal_rank": 0.9166666666666666,
+        "ndcg": 0.9166666666666666,
+        "latency_ms": 56.58016666711774
+      },
+      "by_domain": {
+        "business_knowledge": {
+          "precision": 1.0,
+          "recall": 0.75,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 55.649489750067005
+        },
+        "negotiation_knowledge": {
+          "precision": 0.75,
+          "recall": 0.75,
+          "reciprocal_rank": 0.75,
+          "ndcg": 0.75,
+          "latency_ms": 56.50921875167114
+        },
+        "supplier_knowledge": {
+          "precision": 1.0,
+          "recall": 0.875,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 57.581791499615065
+        }
+      },
+      "errors": 0,
+      "queries": [
+        {
+          "query_id": "q-business-eligibility",
+          "domain": "business_knowledge",
+          "query_type": "eligibility",
+          "latency_ms": 55.13762500049779,
+          "precision": 1.0,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-business-profiles",
+          "domain": "business_knowledge",
+          "query_type": "profile-segmentation",
+          "latency_ms": 56.529374996898696,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-budget-unit",
+          "domain": "business_knowledge",
+          "query_type": "budget-interpretation",
+          "latency_ms": 55.68304200278362,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-live-availability",
+          "domain": "business_knowledge",
+          "query_type": "availability",
+          "latency_ms": 55.24791700008791,
+          "precision": 1.0,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-supplier-direct",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-feature",
+          "latency_ms": 59.62858299608342,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-exclusion",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-constraint",
+          "latency_ms": 57.5352079977165,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-date-change",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 56.47358300484484,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-baggage",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 56.6897919998155,
+          "precision": 1.0,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-negotiation-turn-limit",
+          "domain": "negotiation_knowledge",
+          "query_type": "protocol",
+          "latency_ms": 55.374417002894916,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-cap",
+          "domain": "negotiation_knowledge",
+          "query_type": "budget-cap",
+          "latency_ms": 54.63904200587422,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-payments",
+          "domain": "negotiation_knowledge",
+          "query_type": "allocation",
+          "latency_ms": 57.42333299713209,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-isolation",
+          "domain": "negotiation_knowledge",
+          "query_type": "broker-cohort",
+          "latency_ms": 58.60008300078334,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        }
+      ]
+    },
+    {
+      "top_k": 1,
+      "min_score": 0.8,
+      "summary": {
+        "precision": 0.5,
+        "recall": 0.4583333333333333,
+        "reciprocal_rank": 0.5,
+        "ndcg": 0.5,
+        "latency_ms": 56.35044433256553
+      },
+      "by_domain": {
+        "business_knowledge": {
+          "precision": 0.5,
+          "recall": 0.5,
+          "reciprocal_rank": 0.5,
+          "ndcg": 0.5,
+          "latency_ms": 54.98638550125179
+        },
+        "negotiation_knowledge": {
+          "precision": 0.25,
+          "recall": 0.25,
+          "reciprocal_rank": 0.25,
+          "ndcg": 0.25,
+          "latency_ms": 56.86913499812363
+        },
+        "supplier_knowledge": {
+          "precision": 0.75,
+          "recall": 0.625,
+          "reciprocal_rank": 0.75,
+          "ndcg": 0.75,
+          "latency_ms": 57.195812498321175
+        }
+      },
+      "errors": 0,
+      "queries": [
+        {
+          "query_id": "q-business-eligibility",
+          "domain": "business_knowledge",
+          "query_type": "eligibility",
+          "latency_ms": 54.71704100636998,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-business-profiles",
+          "domain": "business_knowledge",
+          "query_type": "profile-segmentation",
+          "latency_ms": 55.00204199779546,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-budget-unit",
+          "domain": "business_knowledge",
+          "query_type": "budget-interpretation",
+          "latency_ms": 55.12991699652048,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-live-availability",
+          "domain": "business_knowledge",
+          "query_type": "availability",
+          "latency_ms": 55.096542004321236,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-supplier-direct",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-feature",
+          "latency_ms": 59.02841599890962,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-exclusion",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-constraint",
+          "latency_ms": 58.455042002606206,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-date-change",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 54.43433299660683,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-baggage",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 56.865458995162044,
+          "precision": 1.0,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-negotiation-turn-limit",
+          "domain": "negotiation_knowledge",
+          "query_type": "protocol",
+          "latency_ms": 55.26504099543672,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-cap",
+          "domain": "negotiation_knowledge",
+          "query_type": "budget-cap",
+          "latency_ms": 54.59695799800102,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-payments",
+          "domain": "negotiation_knowledge",
+          "query_type": "allocation",
+          "latency_ms": 58.8601249983185,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-isolation",
+          "domain": "negotiation_knowledge",
+          "query_type": "broker-cohort",
+          "latency_ms": 58.754416000738274,
+          "precision": 1.0,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        }
+      ]
+    },
+    {
+      "top_k": 3,
+      "min_score": 0.0,
+      "summary": {
+        "precision": 0.38888888888888884,
+        "recall": 0.9583333333333334,
+        "reciprocal_rank": 1.0,
+        "ndcg": 0.9931099510594131,
+        "latency_ms": 56.44392008192275
+      },
+      "by_domain": {
+        "business_knowledge": {
+          "precision": 0.41666666666666663,
+          "recall": 0.875,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9793298531782393,
+          "latency_ms": 55.1995204987179
+        },
+        "negotiation_knowledge": {
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 56.94722924818052
+        },
+        "supplier_knowledge": {
+          "precision": 0.41666666666666663,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 57.185010498869815
+        }
+      },
+      "errors": 0,
+      "queries": [
+        {
+          "query_id": "q-business-eligibility",
+          "domain": "business_knowledge",
+          "query_type": "eligibility",
+          "latency_ms": 55.01733299752232,
+          "precision": 0.3333333333333333,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9173194127129571,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-business-profiles",
+          "domain": "business_knowledge",
+          "query_type": "profile-segmentation",
+          "latency_ms": 55.358375000650994,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-budget-unit",
+          "domain": "business_knowledge",
+          "query_type": "budget-interpretation",
+          "latency_ms": 55.0311659972067,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-live-availability",
+          "domain": "business_knowledge",
+          "query_type": "availability",
+          "latency_ms": 55.3912079994916,
+          "precision": 0.6666666666666666,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 2,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-supplier-direct",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-feature",
+          "latency_ms": 58.72191699745599,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-exclusion",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-constraint",
+          "latency_ms": 59.03862499690149,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-date-change",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 54.77987499762094,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-baggage",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 56.19962500350084,
+          "precision": 0.6666666666666666,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 2,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-negotiation-turn-limit",
+          "domain": "negotiation_knowledge",
+          "query_type": "protocol",
+          "latency_ms": 55.10900000081165,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-cap",
+          "domain": "negotiation_knowledge",
+          "query_type": "budget-cap",
+          "latency_ms": 54.999333995510824,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-payments",
+          "domain": "negotiation_knowledge",
+          "query_type": "allocation",
+          "latency_ms": 58.46983299852582,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-isolation",
+          "domain": "negotiation_knowledge",
+          "query_type": "broker-cohort",
+          "latency_ms": 59.21074999787379,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        }
+      ]
+    },
+    {
+      "top_k": 3,
+      "min_score": 0.3,
+      "summary": {
+        "precision": 0.38888888888888884,
+        "recall": 0.9583333333333334,
+        "reciprocal_rank": 1.0,
+        "ndcg": 0.9931099510594131,
+        "latency_ms": 56.22001041653372
+      },
+      "by_domain": {
+        "business_knowledge": {
+          "precision": 0.41666666666666663,
+          "recall": 0.875,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9793298531782393,
+          "latency_ms": 55.54912499974307
+        },
+        "negotiation_knowledge": {
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 56.4042812493426
+        },
+        "supplier_knowledge": {
+          "precision": 0.41666666666666663,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 56.70662500051549
+        }
+      },
+      "errors": 0,
+      "queries": [
+        {
+          "query_id": "q-business-eligibility",
+          "domain": "business_knowledge",
+          "query_type": "eligibility",
+          "latency_ms": 56.434874997648876,
+          "precision": 0.3333333333333333,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9173194127129571,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-business-profiles",
+          "domain": "business_knowledge",
+          "query_type": "profile-segmentation",
+          "latency_ms": 54.729208000935614,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-budget-unit",
+          "domain": "business_knowledge",
+          "query_type": "budget-interpretation",
+          "latency_ms": 56.56858300062595,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-live-availability",
+          "domain": "business_knowledge",
+          "query_type": "availability",
+          "latency_ms": 54.463833999761846,
+          "precision": 0.6666666666666666,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 2,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-supplier-direct",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-feature",
+          "latency_ms": 58.793083000637125,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-exclusion",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-constraint",
+          "latency_ms": 58.33433399675414,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-date-change",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 54.495583004609216,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-baggage",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 55.20350000006147,
+          "precision": 0.6666666666666666,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 2,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-negotiation-turn-limit",
+          "domain": "negotiation_knowledge",
+          "query_type": "protocol",
+          "latency_ms": 55.23062499560183,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-cap",
+          "domain": "negotiation_knowledge",
+          "query_type": "budget-cap",
+          "latency_ms": 54.887332997168414,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-payments",
+          "domain": "negotiation_knowledge",
+          "query_type": "allocation",
+          "latency_ms": 57.402375001402106,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-isolation",
+          "domain": "negotiation_knowledge",
+          "query_type": "broker-cohort",
+          "latency_ms": 58.09679200319806,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        }
+      ]
+    },
+    {
+      "top_k": 3,
+      "min_score": 0.5,
+      "summary": {
+        "precision": 0.38888888888888884,
+        "recall": 0.9583333333333334,
+        "reciprocal_rank": 1.0,
+        "ndcg": 0.9931099510594131,
+        "latency_ms": 56.08975008423537
+      },
+      "by_domain": {
+        "business_knowledge": {
+          "precision": 0.41666666666666663,
+          "recall": 0.875,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9793298531782393,
+          "latency_ms": 54.836041750604636
+        },
+        "negotiation_knowledge": {
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 56.6514272504719
+        },
+        "supplier_knowledge": {
+          "precision": 0.41666666666666663,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 56.78178125162958
+        }
+      },
+      "errors": 0,
+      "queries": [
+        {
+          "query_id": "q-business-eligibility",
+          "domain": "business_knowledge",
+          "query_type": "eligibility",
+          "latency_ms": 55.17604199849302,
+          "precision": 0.3333333333333333,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9173194127129571,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-business-profiles",
+          "domain": "business_knowledge",
+          "query_type": "profile-segmentation",
+          "latency_ms": 54.58887500572018,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-budget-unit",
+          "domain": "business_knowledge",
+          "query_type": "budget-interpretation",
+          "latency_ms": 54.95633299869951,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-live-availability",
+          "domain": "business_knowledge",
+          "query_type": "availability",
+          "latency_ms": 54.62291699950583,
+          "precision": 0.6666666666666666,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 2,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-supplier-direct",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-feature",
+          "latency_ms": 58.19095900369575,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-exclusion",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-constraint",
+          "latency_ms": 58.60329200368142,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-date-change",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 54.34854100167286,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-baggage",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 55.9843329974683,
+          "precision": 0.6666666666666666,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 2,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-negotiation-turn-limit",
+          "domain": "negotiation_knowledge",
+          "query_type": "protocol",
+          "latency_ms": 55.22983400442172,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-cap",
+          "domain": "negotiation_knowledge",
+          "query_type": "budget-cap",
+          "latency_ms": 54.67087499710033,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-payments",
+          "domain": "negotiation_knowledge",
+          "query_type": "allocation",
+          "latency_ms": 57.959834004577715,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-isolation",
+          "domain": "negotiation_knowledge",
+          "query_type": "broker-cohort",
+          "latency_ms": 58.74516599578783,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        }
+      ]
+    },
+    {
+      "top_k": 3,
+      "min_score": 0.6,
+      "summary": {
+        "precision": 0.38888888888888884,
+        "recall": 0.9583333333333334,
+        "reciprocal_rank": 1.0,
+        "ndcg": 0.9931099510594131,
+        "latency_ms": 56.588642415590584
+      },
+      "by_domain": {
+        "business_knowledge": {
+          "precision": 0.41666666666666663,
+          "recall": 0.875,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9793298531782393,
+          "latency_ms": 55.52146899935906
+        },
+        "negotiation_knowledge": {
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 56.6255519988772
+        },
+        "supplier_knowledge": {
+          "precision": 0.41666666666666663,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 57.618906248535495
+        }
+      },
+      "errors": 0,
+      "queries": [
+        {
+          "query_id": "q-business-eligibility",
+          "domain": "business_knowledge",
+          "query_type": "eligibility",
+          "latency_ms": 57.11100000189617,
+          "precision": 0.3333333333333333,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9173194127129571,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-business-profiles",
+          "domain": "business_knowledge",
+          "query_type": "profile-segmentation",
+          "latency_ms": 55.040291998011526,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-budget-unit",
+          "domain": "business_knowledge",
+          "query_type": "budget-interpretation",
+          "latency_ms": 55.04662499879487,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-live-availability",
+          "domain": "business_knowledge",
+          "query_type": "availability",
+          "latency_ms": 54.887958998733666,
+          "precision": 0.6666666666666666,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 2,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-supplier-direct",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-feature",
+          "latency_ms": 61.85774999903515,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-exclusion",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-constraint",
+          "latency_ms": 58.26804199750768,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-date-change",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 54.248332999122795,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-baggage",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 56.101499998476356,
+          "precision": 0.6666666666666666,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 2,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-negotiation-turn-limit",
+          "domain": "negotiation_knowledge",
+          "query_type": "protocol",
+          "latency_ms": 54.92337499890709,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-cap",
+          "domain": "negotiation_knowledge",
+          "query_type": "budget-cap",
+          "latency_ms": 54.65720799838891,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-payments",
+          "domain": "negotiation_knowledge",
+          "query_type": "allocation",
+          "latency_ms": 58.59654099913314,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-isolation",
+          "domain": "negotiation_knowledge",
+          "query_type": "broker-cohort",
+          "latency_ms": 58.32508399907965,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        }
+      ]
+    },
+    {
+      "top_k": 3,
+      "min_score": 0.7,
+      "summary": {
+        "precision": 0.3055555555555555,
+        "recall": 0.7916666666666666,
+        "reciprocal_rank": 0.9166666666666666,
+        "ndcg": 0.8959965198449059,
+        "latency_ms": 56.238583417022404
+      },
+      "by_domain": {
+        "business_knowledge": {
+          "precision": 0.3333333333333333,
+          "recall": 0.75,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9586597063564786,
+          "latency_ms": 55.50080224929843
+        },
+        "negotiation_knowledge": {
+          "precision": 0.25,
+          "recall": 0.75,
+          "reciprocal_rank": 0.75,
+          "ndcg": 0.75,
+          "latency_ms": 56.41605224991508
+        },
+        "supplier_knowledge": {
+          "precision": 0.3333333333333333,
+          "recall": 0.875,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9793298531782393,
+          "latency_ms": 56.798895751853706
+        }
+      },
+      "errors": 0,
+      "queries": [
+        {
+          "query_id": "q-business-eligibility",
+          "domain": "business_knowledge",
+          "query_type": "eligibility",
+          "latency_ms": 56.7308339959709,
+          "precision": 0.3333333333333333,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9173194127129571,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-business-profiles",
+          "domain": "business_knowledge",
+          "query_type": "profile-segmentation",
+          "latency_ms": 55.236791995412204,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-budget-unit",
+          "domain": "business_knowledge",
+          "query_type": "budget-interpretation",
+          "latency_ms": 55.14154200500343,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-live-availability",
+          "domain": "business_knowledge",
+          "query_type": "availability",
+          "latency_ms": 54.89404100080719,
+          "precision": 0.3333333333333333,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9173194127129571,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-supplier-direct",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-feature",
+          "latency_ms": 58.5205829993356,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-exclusion",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-constraint",
+          "latency_ms": 58.155042002908885,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-date-change",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 54.53008300537476,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-baggage",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 55.989874999795575,
+          "precision": 0.3333333333333333,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9173194127129571,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-negotiation-turn-limit",
+          "domain": "negotiation_knowledge",
+          "query_type": "protocol",
+          "latency_ms": 55.09708300087368,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-cap",
+          "domain": "negotiation_knowledge",
+          "query_type": "budget-cap",
+          "latency_ms": 54.738291997637134,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-payments",
+          "domain": "negotiation_knowledge",
+          "query_type": "allocation",
+          "latency_ms": 57.339375001902226,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-isolation",
+          "domain": "negotiation_knowledge",
+          "query_type": "broker-cohort",
+          "latency_ms": 58.48945899924729,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        }
+      ]
+    },
+    {
+      "top_k": 3,
+      "min_score": 0.8,
+      "summary": {
+        "precision": 0.16666666666666666,
+        "recall": 0.4583333333333333,
+        "reciprocal_rank": 0.5,
+        "ndcg": 0.4931099510594131,
+        "latency_ms": 56.29520825095824
+      },
+      "by_domain": {
+        "business_knowledge": {
+          "precision": 0.16666666666666666,
+          "recall": 0.5,
+          "reciprocal_rank": 0.5,
+          "ndcg": 0.5,
+          "latency_ms": 54.95023950061295
+        },
+        "negotiation_knowledge": {
+          "precision": 0.08333333333333333,
+          "recall": 0.25,
+          "reciprocal_rank": 0.25,
+          "ndcg": 0.25,
+          "latency_ms": 56.8571977528336
+        },
+        "supplier_knowledge": {
+          "precision": 0.25,
+          "recall": 0.625,
+          "reciprocal_rank": 0.75,
+          "ndcg": 0.7293298531782393,
+          "latency_ms": 57.07818749942817
+        }
+      },
+      "errors": 0,
+      "queries": [
+        {
+          "query_id": "q-business-eligibility",
+          "domain": "business_knowledge",
+          "query_type": "eligibility",
+          "latency_ms": 54.71741700603161,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-business-profiles",
+          "domain": "business_knowledge",
+          "query_type": "profile-segmentation",
+          "latency_ms": 54.795957999886014,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-budget-unit",
+          "domain": "business_knowledge",
+          "query_type": "budget-interpretation",
+          "latency_ms": 55.07058300281642,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-live-availability",
+          "domain": "business_knowledge",
+          "query_type": "availability",
+          "latency_ms": 55.216999993717764,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-supplier-direct",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-feature",
+          "latency_ms": 58.76420799904736,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-exclusion",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-constraint",
+          "latency_ms": 58.841124999162275,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-date-change",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 54.2975420030416,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-baggage",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 56.40987499646144,
+          "precision": 0.3333333333333333,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9173194127129571,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-negotiation-turn-limit",
+          "domain": "negotiation_knowledge",
+          "query_type": "protocol",
+          "latency_ms": 54.886208003154024,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-cap",
+          "domain": "negotiation_knowledge",
+          "query_type": "budget-cap",
+          "latency_ms": 55.00262500572717,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-payments",
+          "domain": "negotiation_knowledge",
+          "query_type": "allocation",
+          "latency_ms": 58.44375000015134,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-isolation",
+          "domain": "negotiation_knowledge",
+          "query_type": "broker-cohort",
+          "latency_ms": 59.096208002301864,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        }
+      ]
+    },
+    {
+      "top_k": 5,
+      "min_score": 0.0,
+      "summary": {
+        "precision": 0.23333333333333334,
+        "recall": 0.9583333333333334,
+        "reciprocal_rank": 1.0,
+        "ndcg": 0.9931099510594131,
+        "latency_ms": 56.37010066614797
+      },
+      "by_domain": {
+        "business_knowledge": {
+          "precision": 0.25,
+          "recall": 0.875,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9793298531782393,
+          "latency_ms": 54.99053124913189
+        },
+        "negotiation_knowledge": {
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 57.114166500468855
+        },
+        "supplier_knowledge": {
+          "precision": 0.25,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 57.005604248843156
+        }
+      },
+      "errors": 0,
+      "queries": [
+        {
+          "query_id": "q-business-eligibility",
+          "domain": "business_knowledge",
+          "query_type": "eligibility",
+          "latency_ms": 55.47325000225101,
+          "precision": 0.2,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9173194127129571,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-business-profiles",
+          "domain": "business_knowledge",
+          "query_type": "profile-segmentation",
+          "latency_ms": 54.380417001084425,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-budget-unit",
+          "domain": "business_knowledge",
+          "query_type": "budget-interpretation",
+          "latency_ms": 55.368832996464334,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-live-availability",
+          "domain": "business_knowledge",
+          "query_type": "availability",
+          "latency_ms": 54.7396249967278,
+          "precision": 0.4,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 2,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-supplier-direct",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-feature",
+          "latency_ms": 58.79083299805643,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-exclusion",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-constraint",
+          "latency_ms": 59.415291994810104,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-date-change",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 54.00112499773968,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-baggage",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 55.81516700476641,
+          "precision": 0.4,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 2,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-negotiation-turn-limit",
+          "domain": "negotiation_knowledge",
+          "query_type": "protocol",
+          "latency_ms": 55.51254199963296,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-cap",
+          "domain": "negotiation_knowledge",
+          "query_type": "budget-cap",
+          "latency_ms": 54.6394999983022,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-payments",
+          "domain": "negotiation_knowledge",
+          "query_type": "allocation",
+          "latency_ms": 58.22429100226145,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-isolation",
+          "domain": "negotiation_knowledge",
+          "query_type": "broker-cohort",
+          "latency_ms": 60.08033300167881,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        }
+      ]
+    },
+    {
+      "top_k": 5,
+      "min_score": 0.3,
+      "summary": {
+        "precision": 0.23333333333333334,
+        "recall": 0.9583333333333334,
+        "reciprocal_rank": 1.0,
+        "ndcg": 0.9931099510594131,
+        "latency_ms": 56.40172550010902
+      },
+      "by_domain": {
+        "business_knowledge": {
+          "precision": 0.25,
+          "recall": 0.875,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9793298531782393,
+          "latency_ms": 55.54705174836272
+        },
+        "negotiation_knowledge": {
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 56.742770751952776
+        },
+        "supplier_knowledge": {
+          "precision": 0.25,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 56.915354000011575
+        }
+      },
+      "errors": 0,
+      "queries": [
+        {
+          "query_id": "q-business-eligibility",
+          "domain": "business_knowledge",
+          "query_type": "eligibility",
+          "latency_ms": 54.950332996668294,
+          "precision": 0.2,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9173194127129571,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-business-profiles",
+          "domain": "business_knowledge",
+          "query_type": "profile-segmentation",
+          "latency_ms": 57.221832998038735,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-budget-unit",
+          "domain": "business_knowledge",
+          "query_type": "budget-interpretation",
+          "latency_ms": 55.27499999880092,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-live-availability",
+          "domain": "business_knowledge",
+          "query_type": "availability",
+          "latency_ms": 54.741040999942925,
+          "precision": 0.4,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 2,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-supplier-direct",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-feature",
+          "latency_ms": 58.669792000728194,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-exclusion",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-constraint",
+          "latency_ms": 58.47691700182622,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-date-change",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 54.24829099501949,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-baggage",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 56.2664160024724,
+          "precision": 0.4,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 2,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-negotiation-turn-limit",
+          "domain": "negotiation_knowledge",
+          "query_type": "protocol",
+          "latency_ms": 55.17766600678442,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-cap",
+          "domain": "negotiation_knowledge",
+          "query_type": "budget-cap",
+          "latency_ms": 54.769708003732376,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-payments",
+          "domain": "negotiation_knowledge",
+          "query_type": "allocation",
+          "latency_ms": 58.49937500170199,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-isolation",
+          "domain": "negotiation_knowledge",
+          "query_type": "broker-cohort",
+          "latency_ms": 58.524333995592315,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        }
+      ]
+    },
+    {
+      "top_k": 5,
+      "min_score": 0.5,
+      "summary": {
+        "precision": 0.23333333333333334,
+        "recall": 0.9583333333333334,
+        "reciprocal_rank": 1.0,
+        "ndcg": 0.9931099510594131,
+        "latency_ms": 56.513527749605906
+      },
+      "by_domain": {
+        "business_knowledge": {
+          "precision": 0.25,
+          "recall": 0.875,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9793298531782393,
+          "latency_ms": 54.86020824901061
+        },
+        "negotiation_knowledge": {
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 57.72829149827885
+        },
+        "supplier_knowledge": {
+          "precision": 0.25,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 56.95208350152825
+        }
+      },
+      "errors": 0,
+      "queries": [
+        {
+          "query_id": "q-business-eligibility",
+          "domain": "business_knowledge",
+          "query_type": "eligibility",
+          "latency_ms": 55.07716599822743,
+          "precision": 0.2,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9173194127129571,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-business-profiles",
+          "domain": "business_knowledge",
+          "query_type": "profile-segmentation",
+          "latency_ms": 54.890583000087645,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-budget-unit",
+          "domain": "business_knowledge",
+          "query_type": "budget-interpretation",
+          "latency_ms": 54.75733400089666,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-live-availability",
+          "domain": "business_knowledge",
+          "query_type": "availability",
+          "latency_ms": 54.71574999683071,
+          "precision": 0.4,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 2,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-supplier-direct",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-feature",
+          "latency_ms": 58.12312500347616,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-exclusion",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-constraint",
+          "latency_ms": 60.247417000937276,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-date-change",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 53.99945899989689,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-baggage",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 55.438333001802675,
+          "precision": 0.4,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 2,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-negotiation-turn-limit",
+          "domain": "negotiation_knowledge",
+          "query_type": "protocol",
+          "latency_ms": 56.852292000257876,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-cap",
+          "domain": "negotiation_knowledge",
+          "query_type": "budget-cap",
+          "latency_ms": 54.994915997667704,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-payments",
+          "domain": "negotiation_knowledge",
+          "query_type": "allocation",
+          "latency_ms": 59.14883299556095,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-isolation",
+          "domain": "negotiation_knowledge",
+          "query_type": "broker-cohort",
+          "latency_ms": 59.91712499962887,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        }
+      ]
+    },
+    {
+      "top_k": 5,
+      "min_score": 0.6,
+      "summary": {
+        "precision": 0.23333333333333334,
+        "recall": 0.9583333333333334,
+        "reciprocal_rank": 1.0,
+        "ndcg": 0.9931099510594131,
+        "latency_ms": 56.617069500134676
+      },
+      "by_domain": {
+        "business_knowledge": {
+          "precision": 0.25,
+          "recall": 0.875,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9793298531782393,
+          "latency_ms": 56.00532324933738
+        },
+        "negotiation_knowledge": {
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 56.75791675093933
+        },
+        "supplier_knowledge": {
+          "precision": 0.25,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "latency_ms": 57.08796850012732
+        }
+      },
+      "errors": 0,
+      "queries": [
+        {
+          "query_id": "q-business-eligibility",
+          "domain": "business_knowledge",
+          "query_type": "eligibility",
+          "latency_ms": 54.053458996349946,
+          "precision": 0.2,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9173194127129571,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-business-profiles",
+          "domain": "business_knowledge",
+          "query_type": "profile-segmentation",
+          "latency_ms": 57.571582998207305,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-budget-unit",
+          "domain": "business_knowledge",
+          "query_type": "budget-interpretation",
+          "latency_ms": 57.14433400135022,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-live-availability",
+          "domain": "business_knowledge",
+          "query_type": "availability",
+          "latency_ms": 55.25191700144205,
+          "precision": 0.4,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 2,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-supplier-direct",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-feature",
+          "latency_ms": 59.47366599866655,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-exclusion",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-constraint",
+          "latency_ms": 58.36295799963409,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-date-change",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 54.424207999545615,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-baggage",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 56.091042002663016,
+          "precision": 0.4,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 2,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-negotiation-turn-limit",
+          "domain": "negotiation_knowledge",
+          "query_type": "protocol",
+          "latency_ms": 54.91566700220574,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-cap",
+          "domain": "negotiation_knowledge",
+          "query_type": "budget-cap",
+          "latency_ms": 54.85324999608565,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-payments",
+          "domain": "negotiation_knowledge",
+          "query_type": "allocation",
+          "latency_ms": 58.28095800097799,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-isolation",
+          "domain": "negotiation_knowledge",
+          "query_type": "broker-cohort",
+          "latency_ms": 58.98179200448794,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        }
+      ]
+    },
+    {
+      "top_k": 5,
+      "min_score": 0.7,
+      "summary": {
+        "precision": 0.18333333333333335,
+        "recall": 0.7916666666666666,
+        "reciprocal_rank": 0.9166666666666666,
+        "ndcg": 0.8959965198449059,
+        "latency_ms": 55.96768758429486
+      },
+      "by_domain": {
+        "business_knowledge": {
+          "precision": 0.2,
+          "recall": 0.75,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9586597063564786,
+          "latency_ms": 54.884000252059195
+        },
+        "negotiation_knowledge": {
+          "precision": 0.15000000000000002,
+          "recall": 0.75,
+          "reciprocal_rank": 0.75,
+          "ndcg": 0.75,
+          "latency_ms": 57.14820850153046
+        },
+        "supplier_knowledge": {
+          "precision": 0.2,
+          "recall": 0.875,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9793298531782393,
+          "latency_ms": 55.87085399929492
+        }
+      },
+      "errors": 0,
+      "queries": [
+        {
+          "query_id": "q-business-eligibility",
+          "domain": "business_knowledge",
+          "query_type": "eligibility",
+          "latency_ms": 55.1711250009248,
+          "precision": 0.2,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9173194127129571,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-business-profiles",
+          "domain": "business_knowledge",
+          "query_type": "profile-segmentation",
+          "latency_ms": 54.755417004344054,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-budget-unit",
+          "domain": "business_knowledge",
+          "query_type": "budget-interpretation",
+          "latency_ms": 54.874542001925875,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-live-availability",
+          "domain": "business_knowledge",
+          "query_type": "availability",
+          "latency_ms": 54.73491700104205,
+          "precision": 0.2,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9173194127129571,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-supplier-direct",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-feature",
+          "latency_ms": 57.49291599931894,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-exclusion",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-constraint",
+          "latency_ms": 55.394958006218076,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-date-change",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 54.169416995137,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-baggage",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 56.42612499650568,
+          "precision": 0.2,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9173194127129571,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-negotiation-turn-limit",
+          "domain": "negotiation_knowledge",
+          "query_type": "protocol",
+          "latency_ms": 55.563417001394555,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-cap",
+          "domain": "negotiation_knowledge",
+          "query_type": "budget-cap",
+          "latency_ms": 55.02816700027324,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-payments",
+          "domain": "negotiation_knowledge",
+          "query_type": "allocation",
+          "latency_ms": 58.681292000983376,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-isolation",
+          "domain": "negotiation_knowledge",
+          "query_type": "broker-cohort",
+          "latency_ms": 59.319958003470674,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        }
+      ]
+    },
+    {
+      "top_k": 5,
+      "min_score": 0.8,
+      "summary": {
+        "precision": 0.1,
+        "recall": 0.4583333333333333,
+        "reciprocal_rank": 0.5,
+        "ndcg": 0.4931099510594131,
+        "latency_ms": 56.74070483291871
+      },
+      "by_domain": {
+        "business_knowledge": {
+          "precision": 0.1,
+          "recall": 0.5,
+          "reciprocal_rank": 0.5,
+          "ndcg": 0.5,
+          "latency_ms": 55.129927250163746
+        },
+        "negotiation_knowledge": {
+          "precision": 0.05,
+          "recall": 0.25,
+          "reciprocal_rank": 0.25,
+          "ndcg": 0.25,
+          "latency_ms": 57.51815599796828
+        },
+        "supplier_knowledge": {
+          "precision": 0.15000000000000002,
+          "recall": 0.625,
+          "reciprocal_rank": 0.75,
+          "ndcg": 0.7293298531782393,
+          "latency_ms": 57.5740312506241
+        }
+      },
+      "errors": 0,
+      "queries": [
+        {
+          "query_id": "q-business-eligibility",
+          "domain": "business_knowledge",
+          "query_type": "eligibility",
+          "latency_ms": 55.186333003803156,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-business-profiles",
+          "domain": "business_knowledge",
+          "query_type": "profile-segmentation",
+          "latency_ms": 55.08841700066114,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-budget-unit",
+          "domain": "business_knowledge",
+          "query_type": "budget-interpretation",
+          "latency_ms": 55.039374994521495,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-business-live-availability",
+          "domain": "business_knowledge",
+          "query_type": "availability",
+          "latency_ms": 55.205584001669195,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-supplier-direct",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-feature",
+          "latency_ms": 59.28070800291607,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-exclusion",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-constraint",
+          "latency_ms": 58.780624996870756,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-date-change",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 55.21641700033797,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-supplier-baggage",
+          "domain": "supplier_knowledge",
+          "query_type": "supplier-policy",
+          "latency_ms": 57.01837500237161,
+          "precision": 0.2,
+          "recall": 0.5,
+          "reciprocal_rank": 1.0,
+          "ndcg": 0.9173194127129571,
+          "relevant_retrieved": 1,
+          "relevant_total": 2
+        },
+        {
+          "query_id": "q-negotiation-turn-limit",
+          "domain": "negotiation_knowledge",
+          "query_type": "protocol",
+          "latency_ms": 56.754999997792765,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-cap",
+          "domain": "negotiation_knowledge",
+          "query_type": "budget-cap",
+          "latency_ms": 55.42145799699938,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-payments",
+          "domain": "negotiation_knowledge",
+          "query_type": "allocation",
+          "latency_ms": 59.18141599977389,
+          "precision": 0.0,
+          "recall": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg": 0.0,
+          "relevant_retrieved": 0,
+          "relevant_total": 1
+        },
+        {
+          "query_id": "q-negotiation-isolation",
+          "domain": "negotiation_knowledge",
+          "query_type": "broker-cohort",
+          "latency_ms": 58.71474999730708,
+          "precision": 0.2,
+          "recall": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg": 1.0,
+          "relevant_retrieved": 1,
+          "relevant_total": 1
+        }
+      ]
+    }
+  ],
+  "run": {
+    "run_id": "6a80490b-20be-49c4-8540-219ecf5a0ad2",
+    "recorded_at_utc": "2026-11-20T17:34:16.309739+00:00",
+    "task": "rag_retrieval",
+    "code": {
+      "commit": "5d547ec18a10965f52f1572296cfdd7dd95fa79f",
+      "working_tree_dirty": true
+    },
+    "dataset": {
+      "path": "data/eval/rag/queries_v1.jsonl",
+      "version": "rag-queries-v1",
+      "sha256": "c0ec1ded9480cf7737de3e34df131046769e964cb3e7092c816a1ce3d39d5b4b",
+      "manifest": {
+        "version": "rag-queries-v1",
+        "synthetic": true,
+        "query_count": 12,
+        "relevance_scale": {
+          "0": "not relevant (implicit for every unlisted passage)",
+          "1": "partially relevant",
+          "2": "relevant",
+          "3": "highly relevant"
+        },
+        "annotation_policy": "Judgment IDs use the corpus v1 one-chunk reference form document_id:0. The evaluator maps these to source passages, collapses multiple retrieved chunks to their source document, and ranks each passage once so alternate chunk-size sweeps remain comparable. Unlisted documents have grade 0. Queries and judgments are synthetic and intended to validate the evaluation pipeline, not support claims about production retrieval.",
+        "limitations": [
+          "One query per narrow test intent/domain pair gives no statistical power.",
+          "Judgments are authored with the synthetic corpus and may favor its vocabulary.",
+          "No model was run to create these relevance labels."
+        ],
+        "manifest_path": "data/eval/rag/queries_v1.manifest.json"
+      }
+    },
+    "configuration": {
+      "provider": "ollama",
+      "model": "mxbai-embed-large",
+      "model_digest": "468836162de7f81e041c43663fedbbba921dcea9b9fefea135685a39b2d83dd8",
+      "embedding_signature": "/api/embed-default-options-v1;digest=468836162de7f81e041c43663fedbbba921dcea9b9fefea135685a39b2d83dd8",
+      "dimension": 1024,
+      "corpus_path": "data/eval/rag/corpus_v1.jsonl",
+      "chunk_size": 120,
+      "overlap": 30,
+      "top_k": [
+        1,
+        3,
+        5
+      ],
+      "thresholds": [
+        0.0,
+        0.3,
+        0.5,
+        0.6,
+        0.7,
+        0.8
+      ]
+    },
+    "status": "completed",
+    "corpus": {
+      "path": "data/eval/rag/corpus_v1.jsonl",
+      "version": "rag-corpus-v1",
+      "sha256": "4403c9f1c0c9ffc046d121471f64e72f83b4706e5a656ef0f89fef89f93faf9b",
+      "manifest": {
+        "version": "rag-corpus-v1",
+        "synthetic": true,
+        "domains": [
+          "business_knowledge",
+          "supplier_knowledge",
+          "negotiation_knowledge"
+        ],
+        "documents": 12,
+        "chunking_reference": {
+          "chunk_size": 1200,
+          "overlap": 0,
+          "expected_chunks_per_document": 1
+        },
+        "limitations": [
+          "All passages are fictional fixtures written for evaluation tooling.",
+          "No supplier availability, real policies, prices, or legal terms are represented.",
+          "Passages fit in one chunk under the declared chunking reference; retrieval metrics collapse any alternate chunks back to their source passage."
+        ],
+        "manifest_path": "data/eval/rag/corpus_v1.manifest.json"
+      }
+    }
+  }
+}

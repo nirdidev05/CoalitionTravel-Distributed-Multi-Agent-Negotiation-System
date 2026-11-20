@@ -11,6 +11,7 @@ so an unreadable file is reported while the options are read (exit code 64). No 
 quotes the path or the content of the file.
 """
 
+import errno
 import json
 from datetime import date
 from pathlib import Path
@@ -21,13 +22,20 @@ from coalition_travel.application.request_contracts import TravelRequestDraft
 from coalition_travel.application.request_understanding import ExtractorContractError
 from coalition_travel.application.trip_proposal import REPLAY_FORMAT_VERSION, REPLAY_PROVIDER
 
+MAX_REPLAY_BYTES = 1_000_000
+
 
 class ReplayStructuredRequestExtractor:
     provider_name = REPLAY_PROVIDER
     model = REPLAY_FORMAT_VERSION
 
     def __init__(self, path: str | Path):
-        raw = Path(path).read_bytes()  # OSError propagates: the caller reports it (code 64)
+        # OSError propagates: the caller reports it (code 64). The read is bounded (final
+        # mission, security review) so that a huge file or a device cannot exhaust memory.
+        with Path(path).open("rb") as source:
+            raw = source.read(MAX_REPLAY_BYTES + 1)
+        if len(raw) > MAX_REPLAY_BYTES:
+            raise OSError(errno.EFBIG, "the replay file is larger than the limit")
         try:
             entries = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):

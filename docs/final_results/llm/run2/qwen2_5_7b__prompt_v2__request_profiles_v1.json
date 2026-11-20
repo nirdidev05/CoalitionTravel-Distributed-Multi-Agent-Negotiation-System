@@ -1,0 +1,733 @@
+{
+  "samples": 7,
+  "request_exact_match": 0.0,
+  "field_exact_match": {
+    "destination": 0.0,
+    "travellers": 0.7142857142857143,
+    "budget_per_person": 0.0,
+    "currency": 1.0,
+    "departure_after": 0.0,
+    "arrival_before": 0.7142857142857143,
+    "direct_flight": 0.0,
+    "excluded_suppliers": 0.8571428571428571,
+    "profiles": 0.0,
+    "origin": 1.0,
+    "trip_type": 0.8571428571428571,
+    "departure_before": 0.8571428571428571,
+    "return_after": 1.0,
+    "return_before": 1.0
+  },
+  "profile_count_exact_match": 0.8571428571428571,
+  "profile_traveller_counts_exact_match": 0.8571428571428571,
+  "profile_constraints_exact_match": 0.0,
+  "profile_exact_match": 0.0,
+  "provider": "ollama",
+  "model": "qwen2.5:7b",
+  "successful_calls": 7,
+  "failed_calls": 0,
+  "mean_latency_ms": 40384.86148214309,
+  "p50_latency_ms": 39367.01575000188,
+  "p95_latency_ms": 57571.85016700532,
+  "errors": [],
+  "status_exact_match": 0.5714285714285714,
+  "status_confusion_matrix": {
+    "invalid": {
+      "invalid": 0,
+      "needs_clarification": 0,
+      "ready": 0,
+      "extraction_error": 0
+    },
+    "needs_clarification": {
+      "invalid": 0,
+      "needs_clarification": 0,
+      "ready": 0,
+      "extraction_error": 0
+    },
+    "ready": {
+      "invalid": 0,
+      "needs_clarification": 3,
+      "ready": 4,
+      "extraction_error": 0
+    },
+    "extraction_error": {
+      "invalid": 0,
+      "needs_clarification": 0,
+      "ready": 0,
+      "extraction_error": 0
+    }
+  },
+  "clarification_metrics": {
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "invalid_request_metrics": {
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "examples": [
+    {
+      "id": "family-budget-split",
+      "expected_status": "ready",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "profile-evaluation-fixture",
+        "travellers": 4,
+        "budget_per_person": "1",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "adults",
+            "traveller_count": 2,
+            "budget_per_person": "900",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null,
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          },
+          {
+            "profile_id": "teens",
+            "traveller_count": 2,
+            "budget_per_person": "500",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null,
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          }
+        ],
+        "origin": null,
+        "trip_type": null,
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      },
+      "actual": {
+        "destination": "Tokyo",
+        "travellers": null,
+        "budget_per_person": null,
+        "currency": "EUR",
+        "departure_after": "2026-11-18",
+        "arrival_before": null,
+        "direct_flight": "preferred",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "adults",
+            "traveller_count": 2,
+            "budget_per_person": "900",
+            "departure_after": "2026-11-18",
+            "arrival_before": null,
+            "direct_flight": "preferred",
+            "excluded_suppliers": [],
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          },
+          {
+            "profile_id": "teenagers",
+            "traveller_count": 2,
+            "budget_per_person": "500",
+            "departure_after": "2026-11-18",
+            "arrival_before": null,
+            "direct_flight": "preferred",
+            "excluded_suppliers": [],
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          }
+        ],
+        "origin": null,
+        "trip_type": null,
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      },
+      "latency_ms": 36204.48229199974
+    },
+    {
+      "id": "single-explicit-group",
+      "expected_status": "ready",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "profile-evaluation-fixture",
+        "travellers": 2,
+        "budget_per_person": "1",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "shared",
+            "traveller_count": 2,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null,
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          }
+        ],
+        "origin": null,
+        "trip_type": null,
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      },
+      "actual": {
+        "destination": "Oslo",
+        "travellers": null,
+        "budget_per_person": "450",
+        "currency": "EUR",
+        "departure_after": "2026-11-18",
+        "arrival_before": null,
+        "direct_flight": "preferred",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "p1",
+            "traveller_count": 2,
+            "budget_per_person": "450",
+            "departure_after": "2026-11-18",
+            "arrival_before": null,
+            "direct_flight": "preferred",
+            "excluded_suppliers": null,
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          }
+        ],
+        "origin": null,
+        "trip_type": null,
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      },
+      "latency_ms": 25832.42529099516
+    },
+    {
+      "id": "flight-constraint-split",
+      "expected_status": "ready",
+      "actual_status": "ready",
+      "expected": {
+        "destination": "profile-evaluation-fixture",
+        "travellers": 4,
+        "budget_per_person": "1",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "direct",
+            "traveller_count": 2,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": "required",
+            "excluded_suppliers": null,
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          },
+          {
+            "profile_id": "flexible",
+            "traveller_count": 2,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": "preferred",
+            "excluded_suppliers": null,
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          }
+        ],
+        "origin": null,
+        "trip_type": null,
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      },
+      "actual": {
+        "destination": "Rome",
+        "travellers": 4,
+        "budget_per_person": "800",
+        "currency": "EUR",
+        "departure_after": "2026-11-18",
+        "arrival_before": null,
+        "direct_flight": "preferred",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "p1",
+            "traveller_count": 2,
+            "budget_per_person": "800",
+            "departure_after": "2026-11-18",
+            "arrival_before": null,
+            "direct_flight": "required",
+            "excluded_suppliers": null,
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          },
+          {
+            "profile_id": "p2",
+            "traveller_count": 2,
+            "budget_per_person": "800",
+            "departure_after": "2026-11-18",
+            "arrival_before": null,
+            "direct_flight": "preferred",
+            "excluded_suppliers": null,
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          }
+        ],
+        "origin": null,
+        "trip_type": null,
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      },
+      "latency_ms": 39555.66495899984
+    },
+    {
+      "id": "duplicate-effective-groups",
+      "expected_status": "ready",
+      "actual_status": "ready",
+      "expected": {
+        "destination": "profile-evaluation-fixture",
+        "travellers": 4,
+        "budget_per_person": "1",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "group-a",
+            "traveller_count": 2,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null,
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          },
+          {
+            "profile_id": "group-b",
+            "traveller_count": 2,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null,
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          }
+        ],
+        "origin": null,
+        "trip_type": null,
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      },
+      "actual": {
+        "destination": "Lisbon",
+        "travellers": 4,
+        "budget_per_person": "500",
+        "currency": "EUR",
+        "departure_after": "2026-11-18",
+        "arrival_before": null,
+        "direct_flight": "preferred",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "group1",
+            "traveller_count": 2,
+            "budget_per_person": "500",
+            "departure_after": "2026-11-18",
+            "arrival_before": null,
+            "direct_flight": "preferred",
+            "excluded_suppliers": [],
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          },
+          {
+            "profile_id": "group2",
+            "traveller_count": 2,
+            "budget_per_person": "500",
+            "departure_after": "2026-11-18",
+            "arrival_before": null,
+            "direct_flight": "preferred",
+            "excluded_suppliers": [],
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          }
+        ],
+        "origin": null,
+        "trip_type": null,
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      },
+      "latency_ms": 37857.730916002765
+    },
+    {
+      "id": "supplier-exclusion-split",
+      "expected_status": "ready",
+      "actual_status": "ready",
+      "expected": {
+        "destination": "profile-evaluation-fixture",
+        "travellers": 3,
+        "budget_per_person": "1",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "one",
+            "traveller_count": 1,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": [
+              "SkyWays"
+            ],
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          },
+          {
+            "profile_id": "two",
+            "traveller_count": 2,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": [
+              "AeroSun"
+            ],
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          }
+        ],
+        "origin": null,
+        "trip_type": null,
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      },
+      "actual": {
+        "destination": "Osaka",
+        "travellers": 3,
+        "budget_per_person": "700",
+        "currency": "EUR",
+        "departure_after": "2026-11-18",
+        "arrival_before": "2026-11-25",
+        "direct_flight": "preferred",
+        "excluded_suppliers": [
+          "SkyWays"
+        ],
+        "profiles": [
+          {
+            "profile_id": "p1",
+            "traveller_count": 1,
+            "budget_per_person": "700",
+            "departure_after": "2026-11-18",
+            "arrival_before": "2026-11-25",
+            "direct_flight": "preferred",
+            "excluded_suppliers": [
+              "SkyWays",
+              "AeroSun"
+            ],
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          },
+          {
+            "profile_id": "p2",
+            "traveller_count": 1,
+            "budget_per_person": "700",
+            "departure_after": "2026-11-18",
+            "arrival_before": "2026-11-25",
+            "direct_flight": "preferred",
+            "excluded_suppliers": [
+              "SkyWays",
+              "AeroSun"
+            ],
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          },
+          {
+            "profile_id": "p3",
+            "traveller_count": 1,
+            "budget_per_person": "700",
+            "departure_after": "2026-11-18",
+            "arrival_before": "2026-11-25",
+            "direct_flight": "preferred",
+            "excluded_suppliers": [
+              "SkyWays",
+              "AeroSun"
+            ],
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          }
+        ],
+        "origin": null,
+        "trip_type": null,
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      },
+      "latency_ms": 57571.85016700532
+    },
+    {
+      "id": "profile-date-override",
+      "expected_status": "ready",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "profile-evaluation-fixture",
+        "travellers": 4,
+        "budget_per_person": "1",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "early",
+            "traveller_count": 2,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": "2027-06-20",
+            "direct_flight": null,
+            "excluded_suppliers": null,
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          },
+          {
+            "profile_id": "flexible",
+            "traveller_count": 2,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null,
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          }
+        ],
+        "origin": null,
+        "trip_type": null,
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      },
+      "actual": {
+        "destination": "Tokyo",
+        "travellers": 4,
+        "budget_per_person": "800",
+        "currency": "EUR",
+        "departure_after": "2026-11-18",
+        "arrival_before": "2027-06-30",
+        "direct_flight": "preferred",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "p1",
+            "traveller_count": 2,
+            "budget_per_person": "800",
+            "departure_after": "2026-11-18",
+            "arrival_before": "2027-06-30",
+            "direct_flight": "preferred",
+            "excluded_suppliers": [],
+            "departure_before": "2027-06-20",
+            "return_after": null,
+            "return_before": null
+          },
+          {
+            "profile_id": "p2",
+            "traveller_count": 2,
+            "budget_per_person": "800",
+            "departure_after": "2026-11-18",
+            "arrival_before": "2027-06-30",
+            "direct_flight": "preferred",
+            "excluded_suppliers": [],
+            "departure_before": "2027-06-30",
+            "return_after": null,
+            "return_before": null
+          }
+        ],
+        "origin": null,
+        "trip_type": "one_way",
+        "departure_before": "2027-06-30",
+        "return_after": null,
+        "return_before": null
+      },
+      "latency_ms": 46304.86099999689
+    },
+    {
+      "id": "direct-required-preferred",
+      "expected_status": "ready",
+      "actual_status": "ready",
+      "expected": {
+        "destination": "profile-evaluation-fixture",
+        "travellers": 2,
+        "budget_per_person": "1",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "strict",
+            "traveller_count": 1,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": "required",
+            "excluded_suppliers": null,
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          },
+          {
+            "profile_id": "flex",
+            "traveller_count": 1,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": "preferred",
+            "excluded_suppliers": null,
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          }
+        ],
+        "origin": null,
+        "trip_type": null,
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      },
+      "actual": {
+        "destination": "Montreal",
+        "travellers": 2,
+        "budget_per_person": "1000",
+        "currency": "EUR",
+        "departure_after": "2026-11-18",
+        "arrival_before": null,
+        "direct_flight": "preferred",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "p1",
+            "traveller_count": 1,
+            "budget_per_person": "1000",
+            "departure_after": "2026-11-18",
+            "arrival_before": null,
+            "direct_flight": "required",
+            "excluded_suppliers": null,
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          },
+          {
+            "profile_id": "p2",
+            "traveller_count": 1,
+            "budget_per_person": "1000",
+            "departure_after": "2026-11-18",
+            "arrival_before": null,
+            "direct_flight": "preferred",
+            "excluded_suppliers": null,
+            "departure_before": null,
+            "return_after": null,
+            "return_before": null
+          }
+        ],
+        "origin": null,
+        "trip_type": null,
+        "departure_before": null,
+        "return_after": null,
+        "return_before": null
+      },
+      "latency_ms": 39367.01575000188
+    }
+  ],
+  "metrics": {
+    "profile_count_exact_match": 0.8571428571428571,
+    "profile_traveller_counts_exact_match": 0.8571428571428571,
+    "profile_constraints_exact_match": 0.0,
+    "profile_exact_match": 0.0
+  },
+  "run": {
+    "run_id": "031a73b2-8cec-4a0c-9783-dd9f53454f29",
+    "recorded_at_utc": "2026-11-20T15:36:29.567890+00:00",
+    "task": "request_profiles",
+    "code": {
+      "commit": "5d547ec18a10965f52f1572296cfdd7dd95fa79f",
+      "working_tree_dirty": true
+    },
+    "dataset": {
+      "path": "data/eval/request_profiles_v1.jsonl",
+      "version": "request-profiles-v1",
+      "sha256": "c0f07b74bf1e816ac7b0e2f47c6435ab8e0aac0534b500b6c6644b85d6f17ec4",
+      "manifest": {
+        "version": "request-profiles-v1",
+        "synthetic": true,
+        "records": 7,
+        "format": "JSONL: id, text, expected_profiles; IDs and profile order are excluded from semantic scoring",
+        "limitations": [
+          "Synthetic cases are not representative of real traveler traffic.",
+          "This profile-only set focuses on splits and constraint preservation; full request extraction is evaluated separately."
+        ],
+        "manifest_path": "data/eval/request_profiles_v1.manifest.json"
+      }
+    },
+    "configuration": {
+      "provider": "ollama",
+      "model": "qwen2.5:7b",
+      "model_digest": "845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e",
+      "prompt_version": "travel-request-extraction-v2",
+      "schema_transport": "all-keys-required-v1",
+      "inference_parameters": {
+        "temperature": 0.0,
+        "stream": false,
+        "seed": 0
+      },
+      "timeout_seconds": 180.0
+    },
+    "status": "completed"
+  }
+}

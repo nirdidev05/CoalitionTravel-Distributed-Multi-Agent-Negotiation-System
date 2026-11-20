@@ -1,0 +1,91 @@
+# Offline continuous integration for CoalitionTravel.
+# No job here calls Ollama or any external service: the LLM and RAG measurements are
+# run by hand (docs/FINAL_LLM_EVALUATION.md, docs/FINAL_RAG_EVALUATION.md).
+name: ci
+
+on:
+  push:
+    branches: [main, p1-coalition-foundations]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install the package and the development tools
+        run: python -m pip install -e '.[dev]'
+      # A real Python 3.10 is needed by the grammar tests (test_*python310*);
+      # without it they are skipped, so the job installs one next to the main interpreter.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Restore the main interpreter
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Reinstall on the main interpreter
+        run: python -m pip install -e '.[dev]'
+      - name: Ruff
+        run: |
+          ruff check Multi-Agent/coalition_travel Multi-Agent/plan_trip.py tests
+          ruff format --check Multi-Agent/coalition_travel Multi-Agent/plan_trip.py tests
+      - name: Data manifests and evaluation datasets
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib
+          pairs = {
+              "data/catalog/catalog_v1.json": ("data/catalog/catalog_v1.manifest.json", "catalog_sha256"),
+              "data/catalog/catalog_v2.json": ("data/catalog/catalog_v2.manifest.json", "catalog_sha256"),
+              "data/catalog/places_v1.json": ("data/catalog/places_v1.manifest.json", "places_sha256"),
+              "data/demand/demand_pool_v1.jsonl": ("data/demand/demand_pool_v1.manifest.json", "pool_sha256"),
+              "data/demand/demand_pool_v2.jsonl": ("data/demand/demand_pool_v2.manifest.json", "pool_sha256"),
+          }
+          for data, (manifest, key) in pairs.items():
+              actual = hashlib.sha256(pathlib.Path(data).read_bytes()).hexdigest()
+              expected = json.loads(pathlib.Path(manifest).read_text(encoding="utf-8"))[key]
+              assert actual == expected, f"{data}: {actual} != {expected}"
+              print("OK", data)
+          PY
+          for dataset in request_extraction request_extraction_v2 request_extraction_v3; do
+            coalition-travel-eval --dataset data/eval/$dataset.jsonl --validate-only
+          done
+          coalition-travel-eval --task profiles --validate-only
+          coalition-travel-eval-rag --validate-only
+      - name: Full suite, two hash seeds (includes the golden master and the contract tests)
+        run: |
+          PYTHONHASHSEED=0 python -m pytest -q
+          PYTHONHASHSEED=2 python -m pytest -q
+      - name: Installed command and the Lyon-Alger scenario, offline
+        run: |
+          coalition-travel-plan --help
+          printf '%s' '{"origin":"Lyon","destination":"Algiers","trip_type":"round_trip","travellers":2,"budget_per_person":"500","departure_after":"2027-02-15","departure_before":"2027-02-15","return_after":"2027-02-25","return_before":"2027-02-25"}' > "$RUNNER_TEMP/lyon_alger.json"
+          coalition-travel-plan --draft-json "$RUNNER_TEMP/lyon_alger.json" --reference-date 2027-01-15 --yes --json > "$RUNNER_TEMP/out.json"
+          python -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['schema']=='trip-proposal-v2', d['schema']; assert d['status']['code']=='served_in_coalition', d['status']; print(d['schema'], d['status']['code'], d['allocation']['saving_cents'])" "$RUNNER_TEMP/out.json"
+
+  # Known open anomaly (docs/FINAL_PROJECT_AUDIT.md, §5): under CPython 3.10 the golden
+  # master of Entry.py prints sets in another order (str hash siphash24 instead of
+  # siphash13). The job runs the full suite and reports it, without hiding the failures.
+  python310:
+    name: full suite on Python 3.10 (known anomaly, reported)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: python -m pip install -e '.[dev]'
+      - run: PYTHONHASHSEED=0 python -m pytest -q

@@ -16,6 +16,7 @@ Demonstration mode only (ID-1): the versioned catalogue v1 and demand pool v1.
 
 import argparse
 import asyncio
+import errno
 import json
 import os
 import re
@@ -87,6 +88,8 @@ EXIT_USAGE = 64  # sysexits EX_USAGE (D-I3-3)
 EXIT_INTERRUPTED = 130
 
 MAX_CLARIFICATION_ROUNDS = 3
+DEFAULT_OLLAMA_TIMEOUT_SECONDS = 180.0
+MAX_INPUT_FILE_BYTES = 1_000_000  # --draft-json (final mission, security review)
 ACCEPTED_ANSWERS = frozenset({"o", "oui"})
 REQUEST_QUESTION = "Décrivez votre demande de voyage : "
 VALIDATION_QUESTION = "Valider cette demande et lancer la simulation ? [o/N] "
@@ -192,16 +195,23 @@ class _Command:
         if args.draft_json is not None:
             self.remember(args.draft_json, "--draft-json")
             try:
-                draft_bytes = Path(args.draft_json).read_bytes()
+                with Path(args.draft_json).open("rb") as source:
+                    draft_bytes = source.read(MAX_INPUT_FILE_BYTES + 1)
             except OSError:
                 raise UsageError("Fichier de --draft-json introuvable ou illisible.") from None
+            if len(draft_bytes) > MAX_INPUT_FILE_BYTES:
+                raise UsageError("Fichier de --draft-json trop volumineux (limite : 1 Mo).")
             return draft_bytes, None
         if args.extractor_replay is not None:
             self.remember(args.extractor_replay, "--extractor-replay")
             self.source = "replay"
             try:
                 extractor = ReplayStructuredRequestExtractor(args.extractor_replay)
-            except OSError:
+            except OSError as exc:
+                if exc.errno == errno.EFBIG:
+                    raise UsageError(
+                        "Fichier de --extractor-replay trop volumineux (limite : 1 Mo)."
+                    ) from None
                 raise UsageError(
                     "Fichier de --extractor-replay introuvable ou illisible."
                 ) from None
@@ -214,7 +224,18 @@ class _Command:
             )
         self.source = "llm"
         base_url = self.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-        return None, OllamaStructuredRequestExtractor(model, base_url=base_url)
+        # Final mission: a 7B model with the full transport schema needs about 30 s per
+        # call on the reference laptop, so the 60 s adapter default was too short.
+        raw_timeout = self.environ.get("OLLAMA_TIMEOUT_SECONDS", "").strip()
+        try:
+            timeout = float(raw_timeout) if raw_timeout else DEFAULT_OLLAMA_TIMEOUT_SECONDS
+        except ValueError:
+            raise UsageError("OLLAMA_TIMEOUT_SECONDS doit être un nombre de secondes.") from None
+        if not 0 < timeout <= 3600:
+            raise UsageError("OLLAMA_TIMEOUT_SECONDS doit être compris entre 0 et 3600.")
+        return None, OllamaStructuredRequestExtractor(
+            model, base_url=base_url, timeout_seconds=timeout
+        )
 
     def extraction(self, extractor):
         if self.source == "draft-json":

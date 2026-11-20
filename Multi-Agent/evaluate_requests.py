@@ -23,6 +23,7 @@ from coalition_travel.application.request_understanding import (
 from coalition_travel.infrastructure.evaluation.provenance import create_run_metadata
 from coalition_travel.infrastructure.llm.ollama import (
     EXTRACTION_PROMPT_VERSION,
+    SCHEMA_TRANSPORT_VERSION,
     OllamaStructuredRequestExtractor,
 )
 
@@ -239,6 +240,7 @@ def main(argv=None) -> int:
                 "model": extractor.model,
                 "model_digest": args.model_digest,
                 "prompt_version": EXTRACTION_PROMPT_VERSION,
+                "schema_transport": SCHEMA_TRANSPORT_VERSION,
                 "inference_parameters": extractor.inference_parameters,
                 "timeout_seconds": extractor.timeout_seconds,
             },

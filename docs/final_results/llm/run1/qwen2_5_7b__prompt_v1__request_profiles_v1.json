@@ -1,0 +1,572 @@
+{
+  "samples": 7,
+  "request_exact_match": 0.0,
+  "field_exact_match": {
+    "destination": 0.0,
+    "travellers": 0.14285714285714285,
+    "budget_per_person": 0.0,
+    "currency": 1.0,
+    "departure_after": 0.7142857142857143,
+    "arrival_before": 0.7142857142857143,
+    "direct_flight": 0.42857142857142855,
+    "excluded_suppliers": 1.0,
+    "profiles": 0.14285714285714285
+  },
+  "profile_count_exact_match": 0.8571428571428571,
+  "profile_traveller_counts_exact_match": 0.7142857142857143,
+  "profile_constraints_exact_match": 0.14285714285714285,
+  "profile_exact_match": 0.14285714285714285,
+  "provider": "ollama",
+  "model": "qwen2.5:7b",
+  "successful_calls": 7,
+  "failed_calls": 0,
+  "mean_latency_ms": 17786.532976000413,
+  "p50_latency_ms": 17450.45625000057,
+  "p95_latency_ms": 26707.859041998745,
+  "errors": [],
+  "status_exact_match": 0.0,
+  "status_confusion_matrix": {
+    "invalid": {
+      "invalid": 0,
+      "needs_clarification": 0,
+      "ready": 0,
+      "extraction_error": 0
+    },
+    "needs_clarification": {
+      "invalid": 0,
+      "needs_clarification": 0,
+      "ready": 0,
+      "extraction_error": 0
+    },
+    "ready": {
+      "invalid": 0,
+      "needs_clarification": 7,
+      "ready": 0,
+      "extraction_error": 0
+    },
+    "extraction_error": {
+      "invalid": 0,
+      "needs_clarification": 0,
+      "ready": 0,
+      "extraction_error": 0
+    }
+  },
+  "clarification_metrics": {
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "invalid_request_metrics": {
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "examples": [
+    {
+      "id": "family-budget-split",
+      "expected_status": "ready",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "profile-evaluation-fixture",
+        "travellers": 4,
+        "budget_per_person": "1",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "adults",
+            "traveller_count": 2,
+            "budget_per_person": "900",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null
+          },
+          {
+            "profile_id": "teens",
+            "traveller_count": 2,
+            "budget_per_person": "500",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null
+          }
+        ]
+      },
+      "actual": {
+        "destination": null,
+        "travellers": null,
+        "budget_per_person": null,
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "adults",
+            "traveller_count": 2,
+            "budget_per_person": "900",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null
+          },
+          {
+            "profile_id": "teenagers",
+            "traveller_count": 2,
+            "budget_per_person": "500",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null
+          }
+        ]
+      },
+      "latency_ms": 12280.500208002195
+    },
+    {
+      "id": "single-explicit-group",
+      "expected_status": "ready",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "profile-evaluation-fixture",
+        "travellers": 2,
+        "budget_per_person": "1",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "shared",
+            "traveller_count": 2,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null
+          }
+        ]
+      },
+      "actual": {
+        "destination": null,
+        "travellers": null,
+        "budget_per_person": null,
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "preferred",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "p1",
+            "traveller_count": 2,
+            "budget_per_person": "450",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null
+          }
+        ]
+      },
+      "latency_ms": 11512.976665999304
+    },
+    {
+      "id": "flight-constraint-split",
+      "expected_status": "ready",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "profile-evaluation-fixture",
+        "travellers": 4,
+        "budget_per_person": "1",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "direct",
+            "traveller_count": 2,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": "required",
+            "excluded_suppliers": null
+          },
+          {
+            "profile_id": "flexible",
+            "traveller_count": 2,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": "preferred",
+            "excluded_suppliers": null
+          }
+        ]
+      },
+      "actual": {
+        "destination": null,
+        "travellers": null,
+        "budget_per_person": null,
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "preferred",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "p1",
+            "traveller_count": 2,
+            "budget_per_person": "800",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": "required",
+            "excluded_suppliers": null
+          },
+          {
+            "profile_id": "p2",
+            "traveller_count": 2,
+            "budget_per_person": "800",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": "preferred",
+            "excluded_suppliers": null
+          }
+        ]
+      },
+      "latency_ms": 18344.17300000132
+    },
+    {
+      "id": "duplicate-effective-groups",
+      "expected_status": "ready",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "profile-evaluation-fixture",
+        "travellers": 4,
+        "budget_per_person": "1",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "group-a",
+            "traveller_count": 2,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null
+          },
+          {
+            "profile_id": "group-b",
+            "traveller_count": 2,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null
+          }
+        ]
+      },
+      "actual": {
+        "destination": null,
+        "travellers": 4,
+        "budget_per_person": null,
+        "currency": "EUR",
+        "departure_after": "2026-11-18",
+        "arrival_before": "2026-11-18",
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "group1",
+            "traveller_count": 2,
+            "budget_per_person": "500",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null
+          },
+          {
+            "profile_id": "group2",
+            "traveller_count": 2,
+            "budget_per_person": "500",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null
+          }
+        ]
+      },
+      "latency_ms": 17450.45625000057
+    },
+    {
+      "id": "supplier-exclusion-split",
+      "expected_status": "ready",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "profile-evaluation-fixture",
+        "travellers": 3,
+        "budget_per_person": "1",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "one",
+            "traveller_count": 1,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": [
+              "SkyWays"
+            ]
+          },
+          {
+            "profile_id": "two",
+            "traveller_count": 2,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": [
+              "AeroSun"
+            ]
+          }
+        ]
+      },
+      "actual": {
+        "destination": null,
+        "travellers": null,
+        "budget_per_person": null,
+        "currency": "EUR",
+        "departure_after": "2026-11-18",
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "p1",
+            "traveller_count": 1,
+            "budget_per_person": "700",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": [
+              "SkyWays"
+            ]
+          },
+          {
+            "profile_id": "p2",
+            "traveller_count": 1,
+            "budget_per_person": "700",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": [
+              "AeroSun"
+            ]
+          },
+          {
+            "profile_id": "p3",
+            "traveller_count": 1,
+            "budget_per_person": "700",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": [
+              "AeroSun",
+              "SkyWays"
+            ]
+          }
+        ]
+      },
+      "latency_ms": 26707.859041998745
+    },
+    {
+      "id": "profile-date-override",
+      "expected_status": "ready",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "profile-evaluation-fixture",
+        "travellers": 4,
+        "budget_per_person": "1",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "early",
+            "traveller_count": 2,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": "2027-06-20",
+            "direct_flight": null,
+            "excluded_suppliers": null
+          },
+          {
+            "profile_id": "flexible",
+            "traveller_count": 2,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null
+          }
+        ]
+      },
+      "actual": {
+        "destination": null,
+        "travellers": null,
+        "budget_per_person": null,
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": "2027-06-30",
+        "direct_flight": "preferred",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "p1",
+            "traveller_count": 2,
+            "budget_per_person": "800",
+            "departure_after": null,
+            "arrival_before": "2027-06-20",
+            "direct_flight": null,
+            "excluded_suppliers": null
+          },
+          {
+            "profile_id": "p2",
+            "traveller_count": 2,
+            "budget_per_person": "800",
+            "departure_after": null,
+            "arrival_before": "2027-06-30",
+            "direct_flight": null,
+            "excluded_suppliers": null
+          }
+        ]
+      },
+      "latency_ms": 21207.493082998553
+    },
+    {
+      "id": "direct-required-preferred",
+      "expected_status": "ready",
+      "actual_status": "needs_clarification",
+      "expected": {
+        "destination": "profile-evaluation-fixture",
+        "travellers": 2,
+        "budget_per_person": "1",
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "any",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "strict",
+            "traveller_count": 1,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": "required",
+            "excluded_suppliers": null
+          },
+          {
+            "profile_id": "flex",
+            "traveller_count": 1,
+            "budget_per_person": null,
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": "preferred",
+            "excluded_suppliers": null
+          }
+        ]
+      },
+      "actual": {
+        "destination": null,
+        "travellers": null,
+        "budget_per_person": null,
+        "currency": "EUR",
+        "departure_after": null,
+        "arrival_before": null,
+        "direct_flight": "preferred",
+        "excluded_suppliers": [],
+        "profiles": [
+          {
+            "profile_id": "p1",
+            "traveller_count": 2,
+            "budget_per_person": "1000",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": null,
+            "excluded_suppliers": null
+          },
+          {
+            "profile_id": "p2",
+            "traveller_count": 1,
+            "budget_per_person": "1000",
+            "departure_after": null,
+            "arrival_before": null,
+            "direct_flight": "required",
+            "excluded_suppliers": null
+          }
+        ]
+      },
+      "latency_ms": 17002.272583002195
+    }
+  ],
+  "metrics": {
+    "profile_count_exact_match": 0.8571428571428571,
+    "profile_traveller_counts_exact_match": 0.7142857142857143,
+    "profile_constraints_exact_match": 0.14285714285714285,
+    "profile_exact_match": 0.14285714285714285
+  },
+  "run": {
+    "run_id": "0b662ebf-4967-4d7b-a9c0-2a3498c4daa7",
+    "recorded_at_utc": "2026-11-20T13:43:14.288008+00:00",
+    "task": "request_profiles",
+    "code": {
+      "commit": null,
+      "working_tree_dirty": null
+    },
+    "dataset": {
+      "path": "data/eval/request_profiles_v1.jsonl",
+      "version": "request-profiles-v1",
+      "sha256": "c0f07b74bf1e816ac7b0e2f47c6435ab8e0aac0534b500b6c6644b85d6f17ec4",
+      "manifest": {
+        "version": "request-profiles-v1",
+        "synthetic": true,
+        "records": 7,
+        "format": "JSONL: id, text, expected_profiles; IDs and profile order are excluded from semantic scoring",
+        "limitations": [
+          "Synthetic cases are not representative of real traveler traffic.",
+          "This profile-only set focuses on splits and constraint preservation; full request extraction is evaluated separately."
+        ],
+        "manifest_path": "data/eval/request_profiles_v1.manifest.json"
+      }
+    },
+    "configuration": {
+      "provider": "ollama",
+      "model": "qwen2.5:7b",
+      "model_digest": "845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e",
+      "prompt_version": "travel-request-extraction-v1",
+      "inference_parameters": {
+        "temperature": 0.0,
+        "stream": false,
+        "seed": 0
+      },
+      "timeout_seconds": 180.0
+    },
+    "status": "completed"
+  }
+}

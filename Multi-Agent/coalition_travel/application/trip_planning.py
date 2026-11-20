@@ -24,6 +24,7 @@ Rules (plan §3.1, §4.3, §4.4, §6.3):
 This module imports no infrastructure: the market and its sessions are ports.
 """
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -37,12 +38,17 @@ from coalition_travel.application.coalition_formation import (
     run_formation_stages,
 )
 from coalition_travel.application.request_contracts import TravelRequestDraft
+from coalition_travel.application.savings_allocation import (
+    AllocationResult,
+    allocate_formation,
+)
 from coalition_travel.application.travel_units import TravelUnitError, build_travel_unit
 from coalition_travel.domain.negotiation_request import NegotiationOutcome, NegotiationRequest
 from coalition_travel.domain.offer import OfferCatalog
 from coalition_travel.domain.travel_unit import MAX_UNIT_ID_LENGTH, TravelUnit
 
 PLANNING_VERSION = "3h-planning-v1"
+_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 PlanStatus = Literal["planned", "request_rejected"]
 
 
@@ -142,6 +148,9 @@ class DemandPoolSnapshot:
         for name in ("version", "sha256", "catalog_version"):
             if type(getattr(self, name)) is not str or not getattr(self, name):
                 raise TypeError(f"{name} must be a non-empty string")
+        # I1 hardening (review reserve 1): a provenance digest, not any string.
+        if not _SHA256_PATTERN.fullmatch(self.sha256):
+            raise PlanningInputError("pool sha256 must be 64 lowercase hexadecimal characters")
         if type(self.requests) is not tuple or any(
             type(item) is not PlanningRequest for item in self.requests
         ):
@@ -217,12 +226,18 @@ class TripPlan:
     pool_version: str | None
     pool_sha256: str | None
     planning_version: str = PLANNING_VERSION
+    allocation: AllocationResult | None = None  # P5 (I2); default keeps I1 constructions
 
     def __post_init__(self):
         if (self.status == "planned") != (self.stages is not None):
             raise PlanConsistencyError("stages are present exactly for a planned lot")
         if (self.status == "request_rejected") != bool(self.rejections):
             raise PlanConsistencyError("rejections are present exactly for a rejected plan")
+        if self.allocation is not None and (
+            self.stages is None
+            or self.allocation.formation_run_id != self.stages.formation.formation_run_id
+        ):
+            raise PlanConsistencyError("an allocation belongs to the formation of its plan")
 
     @property
     def formation(self) -> FormationResult | None:
@@ -365,6 +380,10 @@ def plan_lot(planning: PlanningInput, market: NegotiationMarket) -> TripPlan:
     )
     journals = MappingProxyType(dict(session.journals))
     invariants = verify_journal_invariants(stages, journals, session.oracle_calls)
+    calls_before_allocation = session.oracle_calls
+    allocation = allocate_formation(stages.formation, units)  # P5, no oracle call
+    if session.oracle_calls != calls_before_allocation:
+        raise PlanConsistencyError("P5 must not call the negotiation oracle")
     return TripPlan(
         status="planned",
         focus_request_ids=focus_ids,
@@ -374,5 +393,6 @@ def plan_lot(planning: PlanningInput, market: NegotiationMarket) -> TripPlan:
         stages=stages,
         journals=journals,
         invariants=invariants,
+        allocation=allocation,
         **provenance,
     )

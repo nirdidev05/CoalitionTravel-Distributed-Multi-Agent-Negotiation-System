@@ -46,7 +46,7 @@ que son démarrage soit demandé.
 | Préalable | État |
 |---|---|
 | I1 acceptée | fait |
-| ID-6 (θ_u = 0, paiement minimal nul) confirmée par un addendum à la spécification | **addendum rédigé :** `docs/PHASE_P5_ADDENDUM_ID6.md`, à valider avec ce périmètre. C'est un fichier séparé : la spécification P4 n'est pas modifiée, ce qui préserve la preuve A9. L'addendum explicite une conséquence, qu'il faut valider en connaissance de cause : avec θ = 0, une unité peut payer 0 (exemple E2) |
+| ID-6 (θ_u = 0, paiement minimal nul) confirmée par un addendum à la spécification | **décision validée :** `docs/PHASE_P5_ADDENDUM_ID6.md`, validé avec le périmètre (§9.1). Formulation corrigée au démarrage d'I2 ; la correction figure dans le diff d'I2. C'est un fichier séparé : la spécification P4 n'est pas modifiée, ce qui préserve la preuve A9. L'addendum explicite une conséquence, qu'il faut valider en connaissance de cause : avec θ = 0, une unité peut payer 0 (exemple E2) |
 | Base de référence | option A reconduite, sauf décision Git contraire (§7, D-I2-6) : manifeste SHA-256 et copie complète avant la première modification |
 
 ---

@@ -79,10 +79,12 @@ def load_demand_pool(path: str | Path) -> DemandPoolSnapshot:
     manifest_path = pool_path.with_suffix(".manifest.json")
     if not manifest_path.is_file():
         raise DemandPoolError(f"missing demand pool manifest: {manifest_path}")
+    try:  # I1 hardening (review reserve 2): one error type for every invalid manifest
+        manifest_text = _read_bytes(manifest_path).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise DemandPoolError(f"{manifest_path}: invalid UTF-8") from exc
     manifest = _object(
-        _strict_json(_read_bytes(manifest_path).decode("utf-8"), str(manifest_path)),
-        MANIFEST_KEYS,
-        str(manifest_path),
+        _strict_json(manifest_text, str(manifest_path)), MANIFEST_KEYS, str(manifest_path)
     )
     origin = str(manifest_path)
     if manifest["pool_file"] != pool_path.name:

@@ -32,7 +32,7 @@ from coalition_travel.application.coalition_formation import (
     FormationResult,
     FormedBlock,
 )
-from coalition_travel.application.request_contracts import TravelRequestDraft
+from coalition_travel.application.request_contracts import TravelRequestDraft, draft_document
 from coalition_travel.application.savings_allocation import (
     ALLOCATION_VERSION,
     BlockAllocation,
@@ -45,6 +45,9 @@ from coalition_travel.domain.offer import OfferQuote
 from coalition_travel.domain.travel_unit import TravelUnit
 
 TRIP_PROPOSAL_SCHEMA = "trip-proposal-v1"
+# v2 (scope review I4, D-I4-10): the v1 contract plus the route fields, for route requests
+# only. A v1 proposal never carries a route field and keeps its bytes.
+TRIP_PROPOSAL_SCHEMA_V2 = "trip-proposal-v2"
 
 # Plan §1.2: the exact notice; it contains no forbidden word.
 SIMULATION_NOTICE = (
@@ -196,6 +199,8 @@ class UnitView:
     unit_id: str
     seats: int
     budget_total_cents: int
+    origin_key: str | None = None  # v2 only
+    trip_type: str | None = None  # v2 only
 
 
 @dataclass(frozen=True)
@@ -224,6 +229,15 @@ class NoteView:
 
 
 @dataclass(frozen=True)
+class LegView:
+    departure_date: date
+    arrival_date: date
+    direct: bool
+    capacity_seats: int
+    leg_ref: str
+
+
+@dataclass(frozen=True)
 class OfferView:
     offer_id: str
     supplier_id: str
@@ -236,6 +250,10 @@ class OfferView:
     admissible: bool
     violations: tuple[ViolationView, ...]
     notes: tuple[NoteView, ...]
+    origin: str | None = None  # v2 only
+    trip_type: str | None = None  # v2 only
+    outbound: LegView | None = None  # v2 only
+    return_leg: LegView | None = None  # v2 only; JSON key "return"
 
 
 @dataclass(frozen=True)
@@ -480,8 +498,17 @@ class TripProposal:
     provenance: Provenance
 
     def __post_init__(self):
-        if self.schema != TRIP_PROPOSAL_SCHEMA:
+        if self.schema not in (TRIP_PROPOSAL_SCHEMA, TRIP_PROPOSAL_SCHEMA_V2):
             raise ProposalConsistencyError(f"schema must be {TRIP_PROPOSAL_SCHEMA}")
+        route = self.schema == TRIP_PROPOSAL_SCHEMA_V2
+        if route != (self.unit.origin_key is not None):
+            raise ProposalConsistencyError("the v2 schema is exactly for a unit with a route")
+        if not route and any(
+            getattr(item, name) is not None
+            for item in (self.unit, *self.offers)
+            for name in V2_ONLY_FIELDS[type(item)]
+        ):
+            raise ProposalConsistencyError("a v1 proposal never carries a route field")
         code = self.status.code
         if code not in UNIT_STATUS_CODES:
             raise ProposalConsistencyError(f"unknown unit status {code!r}")
@@ -561,10 +588,12 @@ def build_trip_proposal(
     explanations.sort(key=Explanation.sort_key)
     modifiers = tuple(item.code for item in explanations if item.level == "modifier")
     return TripProposal(
-        schema=TRIP_PROPOSAL_SCHEMA,
+        schema=TRIP_PROPOSAL_SCHEMA_V2 if unit.is_route_unit else TRIP_PROPOSAL_SCHEMA,
         simulation=Simulation(),
-        request=ValidatedRequest(request_id, _freeze(draft.model_dump(mode="json"))),
-        unit=UnitView(unit.unit_id, unit.seats, unit.budget_total_cents),
+        request=ValidatedRequest(request_id, _freeze(draft_document(draft))),
+        unit=UnitView(
+            unit.unit_id, unit.seats, unit.budget_total_cents, unit.origin_key, unit.trip_type
+        ),
         status=UnitStatus(code, modifiers),
         offers=offers,
         solo=_solo_view(plan, unit.unit_id),
@@ -851,9 +880,21 @@ def _offer_views(plan: TripPlan, unit_id: str) -> tuple[OfferView, ...]:
                         key=lambda note: (note.code, note.profile_id),
                     )
                 ),
+                origin=offer.origin,
+                trip_type=offer.trip_type,
+                outbound=_leg_view(offer.outbound),
+                return_leg=_leg_view(offer.return_leg),
             )
         )
     return tuple(sorted(views, key=lambda view: view.offer_id))
+
+
+def _leg_view(leg) -> LegView | None:
+    if leg is None:
+        return None
+    return LegView(
+        leg.departure_date, leg.arrival_date, leg.direct, leg.capacity_seats, leg.leg_ref
+    )
 
 
 # --- negotiation, block and allocation views ----------------------------------------------
@@ -975,8 +1016,39 @@ def _allocation_view(unit_id, allocation: BlockAllocation, shares) -> UnitAlloca
 # --- schema introspection (T-CONF-3) ------------------------------------------------------
 
 
-def contract_field_names() -> frozenset[str]:
-    """Every field name of the public contract, for the closed-schema tests."""
+# Fields that exist in trip-proposal-v2 only, and their JSON names when they differ.
+V2_ONLY_FIELDS: Mapping[type, tuple[str, ...]] = MappingProxyType(
+    {
+        UnitView: ("origin_key", "trip_type"),
+        OfferView: ("origin", "trip_type", "outbound", "return_leg"),
+    }
+)
+JSON_NAMES: Mapping[str, str] = MappingProxyType({"return_leg": "return"})
+
+
+def public_fields(value) -> list[tuple[str, object]]:
+    """(JSON name, value) of a contract object, in field order; a v1 object omits the
+    v2-only fields (they are None there, see TripProposal.__post_init__)."""
+    hidden = () if _route_view(value) else V2_ONLY_FIELDS.get(type(value), ())
+    return [
+        (JSON_NAMES.get(item.name, item.name), getattr(value, item.name))
+        for item in fields(value)
+        if item.name not in hidden
+    ]
+
+
+def _route_view(value) -> bool:
+    if type(value) is UnitView:
+        return value.origin_key is not None
+    if type(value) is OfferView:
+        return value.origin is not None
+    return True
+
+
+def contract_field_names(schema: str = TRIP_PROPOSAL_SCHEMA) -> frozenset[str]:
+    """Every JSON field name of the public contract, for the closed-schema tests."""
+    if schema not in (TRIP_PROPOSAL_SCHEMA, TRIP_PROPOSAL_SCHEMA_V2):
+        raise ValueError(f"unknown schema {schema!r}")
     names: set[str] = set()
     pending: list[type] = [TripProposal, *PARAMS_BY_CODE.values()]
     seen: set[type] = set()
@@ -985,8 +1057,11 @@ def contract_field_names() -> frozenset[str]:
         if cls in seen:
             continue
         seen.add(cls)
+        hidden = V2_ONLY_FIELDS.get(cls, ()) if schema == TRIP_PROPOSAL_SCHEMA else ()
         for item in fields(cls):
-            names.add(item.name)
+            if item.name in hidden:
+                continue
+            names.add(JSON_NAMES.get(item.name, item.name))
             pending.extend(_dataclasses_in(item.type))
     return frozenset(names)
 

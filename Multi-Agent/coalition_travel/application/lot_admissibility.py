@@ -138,14 +138,19 @@ def lot_admissibility(
     units: Iterable[TravelUnit],
     catalog: OfferCatalog,
     reference_date: date,
-    policy: AdmissibilityPolicy = AdmissibilityPolicy.NON_FINANCIAL_V1,
+    policy: AdmissibilityPolicy | None = None,
 ) -> LotAdmissibilityResult:
-    """Evaluate every unit × offer pair, keep the graph and diagnostics, check H2."""
+    """Evaluate every unit × offer pair, keep the graph and diagnostics, check H2.
+
+    Without an explicit policy, it is deduced from the lot (I4, D-I4-8): NON_FINANCIAL_V1
+    for v1 units and offers, NON_FINANCIAL_V2 for route units and packages. A lot that
+    mixes both kinds is refused (K9), and so is a policy that contradicts the lot.
+    """
     if not isinstance(catalog, OfferCatalog):
         raise LotInputError("catalog must be the public OfferCatalog")
     if isinstance(reference_date, datetime) or not isinstance(reference_date, date):
         raise LotInputError("reference_date must be a datetime.date, not datetime")
-    if not isinstance(policy, AdmissibilityPolicy):
+    if policy is not None and not isinstance(policy, AdmissibilityPolicy):
         raise LotInputError("policy must be an AdmissibilityPolicy")
     materialized = tuple(units)
     if not materialized:
@@ -156,6 +161,19 @@ def lot_admissibility(
     if len({unit.unit_id for unit in ordered_units}) != len(ordered_units):
         raise LotInputError("unit_id values must be unique within a lot")
     offers = catalog.offers
+    kinds = {unit.is_route_unit for unit in ordered_units}
+    kinds |= {offer.is_route_offer for offer in offers}
+    if len(kinds) != 1:
+        raise LotInputError("K9: a lot cannot mix v1 and route units or offers")
+    deduced = (
+        AdmissibilityPolicy.NON_FINANCIAL_V2
+        if kinds == {True}
+        else AdmissibilityPolicy.NON_FINANCIAL_V1
+    )
+    if policy is None:
+        policy = deduced
+    elif policy is not deduced:
+        raise LotInputError("the policy contradicts the units and offers of the lot")
 
     results = tuple(
         evaluate_unit_offer(unit, offer, reference_date, policy)

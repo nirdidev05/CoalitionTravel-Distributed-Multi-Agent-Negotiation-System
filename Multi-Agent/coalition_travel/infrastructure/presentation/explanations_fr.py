@@ -60,12 +60,27 @@ FIELD_LABELS = {
     "destination": "la destination",
     "travellers": "le nombre de voyageurs",
     "budget_per_person": "le budget par personne",
+    # route requests (I4)
+    "origin": "le lieu de départ",
+    "trip_type": "le type de trajet (aller simple ou aller-retour)",
+    "departure_after": "la date de départ au plus tôt",
+    "departure_before": "la date de départ au plus tard",
+    "return_after": "la date de retour au plus tôt",
+    "return_before": "la date de retour au plus tard",
 }
 CLARIFICATION_QUESTIONS = {
     "destination": "Quelle est la destination du voyage ?",
     "travellers": "Combien de personnes voyagent ?",
     "budget_per_person": "Quel est le budget par personne, en euros ?",
+    # route requests (I4)
+    "origin": "D'où partez-vous ?",
+    "trip_type": "S'agit-il d'un aller simple ou d'un aller-retour ?",
+    "departure_after": "À partir de quelle date pouvez-vous partir ?",
+    "departure_before": "Jusqu'à quelle date pouvez-vous partir ?",
+    "return_after": "À partir de quelle date pouvez-vous revenir ?",
+    "return_before": "Jusqu'à quelle date pouvez-vous revenir ?",
 }
+PLACE_FIELD_LABELS = {"origin": "le lieu de départ", "destination": "la destination"}
 
 
 def needs_clarification_message(missing_fields) -> str:
@@ -73,8 +88,12 @@ def needs_clarification_message(missing_fields) -> str:
     return "Il manque des informations pour traiter la demande : " + ", ".join(labels) + "."
 
 
-def unknown_place_message() -> str:
-    return "Le lieu demandé n'est pas reconnu par le référentiel des lieux."
+def unknown_place_message(fields=(), known_places=()) -> str:
+    """The unknown value is never quoted; the known places are public catalogue data."""
+    if not fields:
+        return "Le lieu demandé n'est pas reconnu par le référentiel des lieux."
+    labels = " et ".join(PLACE_FIELD_LABELS[field] for field in fields)
+    return f"Lieu non reconnu pour {labels}. Lieux disponibles : {', '.join(known_places)}."
 
 
 REQUEST_REJECTION_MESSAGES = {
@@ -105,6 +124,12 @@ REASON_LABELS = {
     "direct_flight_required": "un vol direct est exigé et l'offre comporte une escale",
     "excluded_supplier": "le fournisseur de l'offre est exclu",
     "unit_exceeds_offer_capacity": "la demande compte plus de voyageurs que la capacité de l'offre",
+    # route packages (I4, NON_FINANCIAL_V2)
+    "origin_mismatch": "le lieu de départ de l'offre ne correspond pas à la demande",
+    "trip_type_mismatch": "le type de trajet de l'offre ne correspond pas à la demande",
+    "departure_after_window": "le départ a lieu après la date de départ demandée",
+    "return_before_window": "le retour part avant la date de retour demandée",
+    "return_after_window": "le retour part après la date de retour demandée",
 }
 
 

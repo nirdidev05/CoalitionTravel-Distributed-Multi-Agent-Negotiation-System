@@ -16,13 +16,19 @@ Demonstration mode only (ID-1): the versioned catalogue v1 and demand pool v1.
 
 import argparse
 import asyncio
+import json
 import os
 import re
 import sys
 from datetime import date
 from pathlib import Path
 
-from coalition_travel.application.request_contracts import TravelRequestDraft
+from coalition_travel.application.request_contracts import (
+    PROFILE_ROUTE_FIELDS,
+    REQUEST_ROUTE_FIELDS,
+    TravelRequestDraft,
+    is_route_request,
+)
 from coalition_travel.application.request_understanding import (
     RequestInputError,
     understand_request,
@@ -34,12 +40,18 @@ from coalition_travel.application.trip_proposal import (
     llm_extraction,
     replay_extraction,
 )
+from coalition_travel.infrastructure.catalog.places import load_place_directory
 from coalition_travel.infrastructure.demand.demand_pool import load_demand_pool
 from coalition_travel.infrastructure.llm.ollama import OllamaStructuredRequestExtractor
 from coalition_travel.infrastructure.llm.replay import ReplayStructuredRequestExtractor
 from coalition_travel.infrastructure.negotiation.market import open_simulated_market
-from coalition_travel.infrastructure.presentation.explanations_fr import CLARIFICATION_QUESTIONS
+from coalition_travel.infrastructure.presentation.explanations_fr import (
+    CLARIFICATION_QUESTIONS,
+    unknown_place_message,
+)
 from coalition_travel.infrastructure.presentation.json_renderer import (
+    STATUS_SCHEMA,
+    STATUS_SCHEMA_V2,
     forbidden_term_error,
     invalid_document,
     needs_clarification_document,
@@ -48,6 +60,7 @@ from coalition_travel.infrastructure.presentation.json_renderer import (
     render_proposal_json,
     render_status_json,
     request_rejected_document,
+    unknown_place_document,
 )
 from coalition_travel.infrastructure.presentation.text_renderer import (
     render_proposal_text,
@@ -60,6 +73,10 @@ from pydantic import ValidationError
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = ROOT / "data" / "catalog" / "catalog_v1.json"
 POOL_PATH = ROOT / "data" / "demand" / "demand_pool_v1.jsonl"
+# Route requests (I4, D-I4-2): catalogue v2, demand pool v2 and the place directory.
+CATALOG_V2_PATH = ROOT / "data" / "catalog" / "catalog_v2.json"
+POOL_V2_PATH = ROOT / "data" / "demand" / "demand_pool_v2.jsonl"
+PLACES_PATH = ROOT / "data" / "catalog" / "places_v1.json"
 
 EXIT_OK = 0
 EXIT_TECHNICAL = 1
@@ -125,6 +142,8 @@ class _Command:
         self.source = "draft-json"
         self.reference_date: date | None = None
         self.as_json = False
+        self.route = False  # the version of the request (D-I4-1); decides the documents
+        self._places = None
 
     # --- streams --------------------------------------------------------------------
 
@@ -205,16 +224,55 @@ class _Command:
         return llm_extraction(extractor.model)
 
     def common(self) -> dict:
-        return {"source": self.source, "reference_date": self.reference_date}
+        schema = STATUS_SCHEMA_V2 if self.route else STATUS_SCHEMA
+        return {"source": self.source, "reference_date": self.reference_date, "schema": schema}
+
+    @property
+    def places(self):
+        if self._places is None:
+            self.remember(PLACES_PATH, PLACES_PATH.name)
+            self._places = load_place_directory(PLACES_PATH)
+        return self._places
+
+    def resolve_places(self, draft):
+        """D-I4-9: canonical names for a route request, or the unknown place fields."""
+        unknown, names = [], {}
+        for field in ("origin", "destination"):
+            spelling = getattr(draft, field)
+            if spelling is None:
+                continue
+            canonical = self.places.resolve(spelling)
+            if canonical is None:
+                unknown.append(field)
+            else:
+                names[field] = canonical
+        if unknown:
+            return None, tuple(unknown)
+        return TravelRequestDraft.model_validate(draft.model_dump(mode="json") | names), ()
+
+    def unknown_place(self, fields):
+        return unknown_place_document(
+            source=self.source,
+            reference_date=self.reference_date,
+            fields=fields,
+            known_places=self.places.names,
+        )
 
     def from_draft_json(self, draft_bytes):
         try:
             draft = TravelRequestDraft.model_validate_json(draft_bytes)
         except ValidationError as exc:
+            self.route = _raw_is_route(draft_bytes)
             return invalid_document(errors=reduce_validation_error(exc), **self.common())
+        self.route = is_route_request(draft)
         refused = self.refuse_forbidden_strings(draft)
         if refused is not None:
             return refused
+        if self.route:
+            resolved, unknown = self.resolve_places(draft)
+            if unknown:
+                return self.unknown_place(unknown)
+            draft = resolved
         validation = validate_request_draft(draft, self.reference_date)
         if validation.status == "needs_clarification":
             return needs_clarification_document(
@@ -242,12 +300,29 @@ class _Command:
                 result = asyncio.run(understand_request(text, extractor, self.reference_date))
             except RequestInputError as exc:
                 return invalid_document(errors=[str(exc)], **self.common())
-            if result.request is not None:
-                refused = self.refuse_forbidden_strings(result.request)
+            request = result.request
+            if request is not None:
+                self.route = is_route_request(request)
+                refused = self.refuse_forbidden_strings(request)
                 if refused is not None:
                     return refused
+            if request is not None and self.route:
+                resolved, unknown = self.resolve_places(request)
+                if unknown:  # a clarification round that lists the known places
+                    if rounds == MAX_CLARIFICATION_ROUNDS:
+                        return self.unknown_place(unknown)
+                    message = unknown_place_message(unknown, self.places.names)
+                    answer = self.ask(
+                        f"Précision {rounds + 1}/{MAX_CLARIFICATION_ROUNDS} : {message} "
+                    )
+                    if answer == "":
+                        return self.unknown_place(unknown)
+                    text = text + "\n" + answer.rstrip("\n")
+                    rounds += 1
+                    continue
+                request = resolved
             if result.status == "ready":
-                return result.request
+                return request
             if result.status == "invalid":
                 return invalid_document(errors=result.errors, **self.common())
             missing = result.missing_fields
@@ -290,10 +365,6 @@ class _Command:
     def execute(self, argv) -> int:
         args = self.parse(argv)
         draft_bytes, extractor = self.read_inputs(args)
-        self.remember(CATALOG_PATH, CATALOG_PATH.name)
-        self.remember(POOL_PATH, POOL_PATH.name)
-        market = self.open_market(CATALOG_PATH, self.reference_date)
-        pool = self.load_pool(POOL_PATH)
         if draft_bytes is not None:
             obtained = self.from_draft_json(draft_bytes)
         else:
@@ -301,6 +372,13 @@ class _Command:
         if not isinstance(obtained, TravelRequestDraft):
             return self.finish_with_status(obtained)
         draft = obtained
+        # D-I4-2: the catalogue and the pool follow the version of the request.
+        catalog_path = CATALOG_V2_PATH if self.route else CATALOG_PATH
+        pool_path = POOL_V2_PATH if self.route else POOL_PATH
+        self.remember(catalog_path, catalog_path.name)
+        self.remember(pool_path, pool_path.name)
+        market = self.open_market(catalog_path, self.reference_date)
+        pool = self.load_pool(pool_path)
         self.say(render_request_summary(draft))
         refusal = self.validated(args.yes)
         if refusal is not None:
@@ -325,6 +403,23 @@ class _Command:
         self.stdout.write(output)
         self.stdout.flush()
         return EXIT_OK
+
+
+def _raw_is_route(raw: bytes) -> bool:
+    """Version of a draft that failed validation, read from its JSON keys when possible."""
+    try:
+        document = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        return False
+    if not isinstance(document, dict):
+        return False
+    if any(name in document for name in REQUEST_ROUTE_FIELDS):
+        return True
+    profiles = document.get("profiles")
+    return isinstance(profiles, list) and any(
+        isinstance(profile, dict) and any(name in profile for name in PROFILE_ROUTE_FIELDS)
+        for profile in profiles
+    )
 
 
 def run(

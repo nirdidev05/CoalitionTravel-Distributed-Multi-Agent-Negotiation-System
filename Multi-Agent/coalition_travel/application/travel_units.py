@@ -10,7 +10,7 @@ from coalition_travel.application.profiles import (
     consolidate_profiles,
     negotiation_profile_key,
 )
-from coalition_travel.application.request_contracts import TravelRequestDraft
+from coalition_travel.application.request_contracts import TravelRequestDraft, is_route_request
 from coalition_travel.application.request_understanding import validate_request_draft
 from coalition_travel.domain.destination import normalize_destination_key
 from coalition_travel.domain.money import (
@@ -112,24 +112,44 @@ def build_travel_unit(
         raise TravelUnitError("budget_total_out_of_range")
 
     destination_key = normalize_destination_key(draft.destination)
+    origin_key = trip_type = None
+    if is_route_request(draft):  # v2 (I4): the origin is the resolved place name
+        if draft.origin is None or draft.trip_type is None:
+            raise TravelUnitError("route_incomplete")
+        origin_key = normalize_destination_key(draft.origin)
+        trip_type = draft.trip_type
     return TravelUnit(
         unit_id=unit_id,
         destination_key=destination_key,
         profiles=profiles,
-        fingerprint=unit_fingerprint(destination_key, profiles),
+        fingerprint=unit_fingerprint(
+            destination_key, profiles, origin_key=origin_key, trip_type=trip_type
+        ),
         rounded_budget_profiles=rounded_ids,
+        origin_key=origin_key,
+        trip_type=trip_type,
     )
 
 
-def unit_fingerprint(destination_key: str, profiles: tuple[TravelerProfile, ...]) -> str:
+def unit_fingerprint(
+    destination_key: str,
+    profiles: tuple[TravelerProfile, ...],
+    *,
+    origin_key: str | None = None,
+    trip_type: str | None = None,
+) -> str:
     """SHA-256 of the unit's negotiation content, without technical identifiers.
 
     Profile and unit identifiers are excluded, so equivalent drafts ("500" / "500.00",
     reordered or renamed profiles) share a fingerprint, while any change of seats,
-    budget, dates, flight requirement or exclusions changes it.
+    budget, dates, flight requirement or exclusions changes it. The route (origin, trip
+    type, effective route windows) enters only for a v2 unit, so a v1 fingerprint is
+    unchanged byte for byte (plan §6.4, K1).
     """
-    entries = [
-        {
+    route = origin_key is not None
+    entries = []
+    for profile in profiles:
+        entry = {
             "traveller_count": profile.traveller_count,
             "budget_cents": cents_from_budget(profile.budget_per_person),
             "departure_after": _iso(profile.departure_after),
@@ -139,10 +159,17 @@ def unit_fingerprint(destination_key: str, profiles: tuple[TravelerProfile, ...]
                 {supplier.casefold() for supplier in profile.excluded_suppliers}
             ),
         }
-        for profile in profiles
-    ]
+        if route:
+            entry["departure_before"] = _iso(profile.departure_before)
+            entry["return_after"] = _iso(profile.return_after)
+            entry["return_before"] = _iso(profile.return_before)
+        entries.append(entry)
     entries.sort(key=_canonical_json)
-    payload = _canonical_json({"destination_key": destination_key, "profiles": entries})
+    document = {"destination_key": destination_key, "profiles": entries}
+    if route:
+        document["origin_key"] = origin_key
+        document["trip_type"] = trip_type
+    payload = _canonical_json(document)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

@@ -81,7 +81,7 @@ def test_ollama_adapter_records_and_sends_reproducibility_parameters(monkeypatch
 
     asyncio.run(extractor.extract("One person to Tokyo, 500 EUR", date(2026, 1, 1)))
 
-    assert extractor.prompt_version == "travel-request-extraction-v1"
+    assert extractor.prompt_version == "travel-request-extraction-v2"  # I4, D-I4-12
     assert extractor.inference_parameters == {"temperature": 0.15, "stream": False, "seed": 71}
     assert received["body"]["options"] == {"temperature": 0.15, "seed": 71}
 

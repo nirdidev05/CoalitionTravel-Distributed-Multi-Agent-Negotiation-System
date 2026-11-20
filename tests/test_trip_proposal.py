@@ -20,7 +20,7 @@ from types import MappingProxyType
 
 import pytest
 from coalition_travel.application.coalition_candidates import FormationLimits
-from coalition_travel.application.request_contracts import TravelRequestDraft
+from coalition_travel.application.request_contracts import TravelRequestDraft, draft_document
 from coalition_travel.application.savings_allocation import UnallocatedUnit
 from coalition_travel.application.trip_planning import (
     DemandPoolSnapshot,
@@ -161,7 +161,7 @@ def strings(proposal):
 def frozen_dump(item):
     return {
         key: tuple(value) if isinstance(value, list) else value
-        for key, value in item.model_dump(mode="json").items()
+        for key, value in draft_document(item).items()  # I4: the published draft (v1 keys)
     }
 
 

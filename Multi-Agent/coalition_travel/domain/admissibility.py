@@ -28,6 +28,7 @@ class AdmissibilityPolicy(str, Enum):
     """Closed set of supported admissibility policies."""
 
     NON_FINANCIAL_V1 = "non_financial_v1"
+    NON_FINANCIAL_V2 = "non_financial_v2"  # route packages (plan §6.2, I4)
 
 
 class AdmissibilityRuleId(str, Enum):
@@ -38,6 +39,9 @@ class AdmissibilityRuleId(str, Enum):
     DIRECT_FLIGHT = "direct_flight"
     SUPPLIER_EXCLUSION = "supplier_exclusion"
     UNIT_CAPACITY = "unit_capacity"
+    ORIGIN = "origin"  # v2 only
+    TRIP_TYPE = "trip_type"  # v2 only
+    RETURN_WINDOW = "return_window"  # v2 only
 
 
 RULE_ORDER = (
@@ -51,10 +55,33 @@ RULE_ORDER = (
 )
 # Hard constraints that no registered policy may drop.
 MANDATORY_RULES = frozenset(RULE_ORDER)
+# v2 (plan §6.2): the v1 rules in the same relative order, plus the route rules.
+RULE_ORDER_V2 = (
+    AdmissibilityRuleId.DESTINATION,
+    AdmissibilityRuleId.ORIGIN,
+    AdmissibilityRuleId.TRIP_TYPE,
+    AdmissibilityRuleId.OFFER_NOT_BEFORE_REFERENCE,
+    AdmissibilityRuleId.DEPARTURE_WINDOW,
+    AdmissibilityRuleId.ARRIVAL_WINDOW,
+    AdmissibilityRuleId.RETURN_WINDOW,
+    AdmissibilityRuleId.DIRECT_FLIGHT,
+    AdmissibilityRuleId.SUPPLIER_EXCLUSION,
+    AdmissibilityRuleId.UNIT_CAPACITY,
+)
+MANDATORY_RULES_V2 = frozenset(RULE_ORDER_V2)
 
 # MappingProxyType plus tuple/Enum values makes both the registry and its values read-only.
 RULE_REGISTRY: Mapping[AdmissibilityPolicy, tuple[AdmissibilityRuleId, ...]] = MappingProxyType(
-    {AdmissibilityPolicy.NON_FINANCIAL_V1: RULE_ORDER}
+    {
+        AdmissibilityPolicy.NON_FINANCIAL_V1: RULE_ORDER,
+        AdmissibilityPolicy.NON_FINANCIAL_V2: RULE_ORDER_V2,
+    }
+)
+_EXPECTED_RULES = MappingProxyType(
+    {
+        AdmissibilityPolicy.NON_FINANCIAL_V1: (RULE_ORDER, MANDATORY_RULES),
+        AdmissibilityPolicy.NON_FINANCIAL_V2: (RULE_ORDER_V2, MANDATORY_RULES_V2),
+    }
 )
 
 RejectionReason = Literal[
@@ -65,6 +92,11 @@ RejectionReason = Literal[
     "direct_flight_required",
     "excluded_supplier",
     "unit_exceeds_offer_capacity",
+    "origin_mismatch",
+    "trip_type_mismatch",
+    "departure_after_window",
+    "return_before_window",
+    "return_after_window",
 ]
 NoteCode = Literal["direct_preference_not_met"]
 
@@ -79,12 +111,24 @@ RULE_REASONS: Mapping[AdmissibilityRuleId, str] = MappingProxyType(
         AdmissibilityRuleId.UNIT_CAPACITY: "unit_exceeds_offer_capacity",
     }
 )
+# Every reason a rule may give, v1 and v2. The v1 mapping above is unchanged; a v2 window
+# rule has two reasons: the code says where the offer lies relative to the window.
+RULE_REASONS_V2: Mapping[AdmissibilityRuleId, tuple[str, ...]] = MappingProxyType(
+    {
+        **{rule: (reason,) for rule, reason in RULE_REASONS.items()},
+        AdmissibilityRuleId.DEPARTURE_WINDOW: ("departure_before_window", "departure_after_window"),
+        AdmissibilityRuleId.ORIGIN: ("origin_mismatch",),
+        AdmissibilityRuleId.TRIP_TYPE: ("trip_type_mismatch",),
+        AdmissibilityRuleId.RETURN_WINDOW: ("return_before_window", "return_after_window"),
+    }
+)
 PROFILE_LEVEL_RULES = frozenset(
     {
         AdmissibilityRuleId.DEPARTURE_WINDOW,
         AdmissibilityRuleId.ARRIVAL_WINDOW,
         AdmissibilityRuleId.DIRECT_FLIGHT,
         AdmissibilityRuleId.SUPPLIER_EXCLUSION,
+        AdmissibilityRuleId.RETURN_WINDOW,
     }
 )
 NOTE_CODES = frozenset({"direct_preference_not_met"})
@@ -92,8 +136,8 @@ NOTE_CODES = frozenset({"direct_preference_not_met"})
 
 def _violation_sort_key(violation: "AdmissibilityViolation") -> tuple:
     """Rule order, then unit-level (no profile) before profile-level, then profile_id."""
-    return (
-        RULE_ORDER.index(violation.rule),
+    return (  # RULE_ORDER_V2 keeps the relative order of the v1 rules
+        RULE_ORDER_V2.index(violation.rule),
         violation.profile_id is not None,
         violation.profile_id or "",
     )
@@ -108,7 +152,7 @@ class AdmissibilityViolation:
     def __post_init__(self):
         if not isinstance(self.rule, AdmissibilityRuleId):
             raise TypeError("rule must be an AdmissibilityRuleId")
-        if self.reason != RULE_REASONS[self.rule]:
+        if self.reason not in RULE_REASONS_V2[self.rule]:
             raise ValueError(f"reason {self.reason!r} does not belong to rule {self.rule.value}")
         if self.rule in PROFILE_LEVEL_RULES:
             if type(self.profile_id) is not str or not self.profile_id:
@@ -195,8 +239,14 @@ def evaluate_unit_offer(
     if not isinstance(policy, AdmissibilityPolicy):
         raise TypeError("policy must be an AdmissibilityPolicy")
     rules = RULE_REGISTRY[policy]
-    if not MANDATORY_RULES <= set(rules) or rules != RULE_ORDER:
+    expected, mandatory = _EXPECTED_RULES[policy]
+    if not mandatory <= set(rules) or rules != expected:
         raise RuntimeError("admissibility rule registry is inconsistent")
+    route = unit.is_route_unit or offer.is_route_offer
+    if (policy is AdmissibilityPolicy.NON_FINANCIAL_V2) != route:
+        raise ValueError("a route unit or package needs NON_FINANCIAL_V2, and only them")
+    if route:
+        return _evaluate_route(unit, offer, reference_date, policy)
 
     # Re-normalize both inputs here rather than trusting constructors or cached keys.
     if normalize_destination_key(unit.destination_key) != normalize_destination_key(
@@ -256,6 +306,97 @@ def evaluate_unit_offer(
             AdmissibilityViolation(AdmissibilityRuleId.UNIT_CAPACITY, "unit_exceeds_offer_capacity")
         )
 
+    notes = tuple(
+        AdmissibilityNote("direct_preference_not_met", profile.profile_id)
+        for profile in profiles
+        if profile.direct_flight == "preferred" and not offer.direct
+    )
+    return PairAdmissibility(
+        unit.unit_id, offer.offer_id, policy, not violations, tuple(violations), notes
+    )
+
+
+def _evaluate_route(unit, offer, reference_date, policy) -> PairAdmissibility:
+    """NON_FINANCIAL_V2 (plan §6.2): the v1 rules on the outbound leg, plus the route.
+
+    A route mismatch (destination and/or origin) is the only violation reported for its
+    pair, as the destination mismatch is in v1. Return windows apply to a round trip.
+    """
+    if not (unit.is_route_unit and offer.is_route_offer):
+        raise ValueError("NON_FINANCIAL_V2 compares a route unit with a package")
+    rule = AdmissibilityRuleId
+    route = []
+    if normalize_destination_key(unit.destination_key) != offer.destination_key:
+        route.append(AdmissibilityViolation(rule.DESTINATION, "destination_mismatch"))
+    if normalize_destination_key(unit.origin_key) != offer.origin_key:
+        route.append(AdmissibilityViolation(rule.ORIGIN, "origin_mismatch"))
+    if route:
+        return PairAdmissibility(unit.unit_id, offer.offer_id, policy, False, tuple(route))
+
+    profiles = tuple(sorted(unit.profiles, key=lambda profile: profile.profile_id))
+    violations: list[AdmissibilityViolation] = []
+    if unit.trip_type != offer.trip_type:
+        violations.append(AdmissibilityViolation(rule.TRIP_TYPE, "trip_type_mismatch"))
+    if offer.departure_date < reference_date:
+        violations.append(
+            AdmissibilityViolation(
+                rule.OFFER_NOT_BEFORE_REFERENCE, "offer_departs_before_reference_date"
+            )
+        )
+    for profile in profiles:
+        if profile.departure_after is not None and offer.departure_date < profile.departure_after:
+            violations.append(
+                AdmissibilityViolation(
+                    rule.DEPARTURE_WINDOW, "departure_before_window", profile.profile_id
+                )
+            )
+        elif (
+            profile.departure_before is not None and offer.departure_date > profile.departure_before
+        ):
+            violations.append(
+                AdmissibilityViolation(
+                    rule.DEPARTURE_WINDOW, "departure_after_window", profile.profile_id
+                )
+            )
+    for profile in profiles:
+        if profile.arrival_before is not None and offer.arrival_date > profile.arrival_before:
+            violations.append(
+                AdmissibilityViolation(
+                    rule.ARRIVAL_WINDOW, "arrival_after_window", profile.profile_id
+                )
+            )
+    back = offer.return_leg
+    for profile in profiles if back is not None else ():
+        if profile.return_after is not None and back.departure_date < profile.return_after:
+            violations.append(
+                AdmissibilityViolation(
+                    rule.RETURN_WINDOW, "return_before_window", profile.profile_id
+                )
+            )
+        elif profile.return_before is not None and back.departure_date > profile.return_before:
+            violations.append(
+                AdmissibilityViolation(
+                    rule.RETURN_WINDOW, "return_after_window", profile.profile_id
+                )
+            )
+    for profile in profiles:
+        if profile.direct_flight == "required" and not offer.direct:
+            violations.append(
+                AdmissibilityViolation(
+                    rule.DIRECT_FLIGHT, "direct_flight_required", profile.profile_id
+                )
+            )
+    supplier = normalize_supplier_key(offer.supplier_id)
+    for profile in profiles:
+        excluded = {normalize_supplier_key(item) for item in profile.excluded_suppliers}
+        if supplier in excluded:
+            violations.append(
+                AdmissibilityViolation(
+                    rule.SUPPLIER_EXCLUSION, "excluded_supplier", profile.profile_id
+                )
+            )
+    if unit.seats > offer.capacity_seats:
+        violations.append(AdmissibilityViolation(rule.UNIT_CAPACITY, "unit_exceeds_offer_capacity"))
     notes = tuple(
         AdmissibilityNote("direct_preference_not_met", profile.profile_id)
         for profile in profiles

@@ -10,7 +10,7 @@ the raw text typed by the person is never copied (B9).
 from collections.abc import Mapping
 from decimal import Decimal
 
-from coalition_travel.application.request_contracts import TravelRequestDraft
+from coalition_travel.application.request_contracts import TravelRequestDraft, draft_document
 from coalition_travel.application.trip_proposal import (
     JournalView,
     TripProposal,
@@ -22,6 +22,7 @@ from coalition_travel.infrastructure.presentation.explanations_fr import (
     explanation_message,
     forbidden_term_message,
     needs_clarification_message,
+    unknown_place_message,
     violation_text,
 )
 from coalition_travel.infrastructure.presentation.json_renderer import ensure_vocabulary
@@ -73,7 +74,59 @@ def _suppliers(values) -> str:
     return ", ".join(values) if values else "aucun"
 
 
+TRIP_TYPE_LABELS = {"one_way": "aller simple", "round_trip": "aller-retour"}
+
+
+def _window(after, before) -> str:
+    if after is None and before is None:
+        return "non précisée"
+    if after == before:
+        return f"le {after}"
+    return f"entre le {_date(after)} et le {_date(before)}"
+
+
+def _route_request_lines(draft: Mapping) -> list[str]:
+    """Summary of a v2 request (I4): the route, then the v1 fields that keep a meaning."""
+    trip_type = draft["trip_type"]
+    lines = [
+        f"- départ de : {draft['origin']}",
+        f"- destination : {draft['destination']}",
+        f"- type de trajet : {TRIP_TYPE_LABELS.get(trip_type, 'non précisé')}",
+        f"- voyageurs : {draft['travellers']}",
+        f"- budget par personne : {_decimal_euros(draft['budget_per_person'])}",
+        f"- départ de l'aller : {_window(draft['departure_after'], draft['departure_before'])}",
+    ]
+    if trip_type != "one_way":
+        lines.append(
+            f"- départ du retour : {_window(draft['return_after'], draft['return_before'])}"
+        )
+    lines += [
+        f"- arrivée de l'aller au plus tard : {_date(draft['arrival_before'])}",
+        f"- vol direct : {DIRECT_LABELS[draft['direct_flight']]}",
+        f"- fournisseurs exclus : {_suppliers(draft['excluded_suppliers'])}",
+    ]
+    for profile in draft["profiles"]:
+        details = [f"{profile['traveller_count']} voyageur(s)"]
+        if profile["budget_per_person"] is not None:
+            details.append(f"budget {_decimal_euros(profile['budget_per_person'])}")
+        if profile["departure_after"] is not None or profile["departure_before"] is not None:
+            window = _window(profile["departure_after"], profile["departure_before"])
+            details.append(f"départ de l'aller {window}")
+        if profile["return_after"] is not None or profile["return_before"] is not None:
+            details.append(
+                f"départ du retour {_window(profile['return_after'], profile['return_before'])}"
+            )
+        if profile["direct_flight"] is not None:
+            details.append(f"vol direct {DIRECT_LABELS[profile['direct_flight']]}")
+        if profile["excluded_suppliers"]:
+            details.append(f"fournisseurs exclus {_suppliers(profile['excluded_suppliers'])}")
+        lines.append(f"- profil {profile['profile_id']} : " + ", ".join(details))
+    return lines
+
+
 def _request_lines(draft: Mapping) -> list[str]:
+    if "origin" in draft:  # v2: draft_document shows the route keys of a route request only
+        return _route_request_lines(draft)
     lines = [
         f"- destination : {draft['destination']}",
         f"- voyageurs : {draft['travellers']}",
@@ -104,7 +157,7 @@ def render_request_summary(draft: TravelRequestDraft) -> str:
     """Summary of the understood request, shown before the validation question."""
     if not isinstance(draft, TravelRequestDraft):
         raise TypeError("draft must be a TravelRequestDraft")
-    lines = ["Demande comprise :", *_request_lines(draft.model_dump(mode="json"))]
+    lines = ["Demande comprise :", *_request_lines(draft_document(draft))]
     return ensure_vocabulary("\n".join(lines) + "\n")
 
 
@@ -115,11 +168,25 @@ def _offer_lines(proposal: TripProposal) -> list[str]:
     lines = []
     for offer in proposal.offers:
         kind = "vol direct" if offer.direct else "avec escale"
-        lines.append(
-            f"- {offer.offer_id} : {offer.supplier_id}, {offer.destination}, départ "
-            f"{offer.departure_date}, arrivée {offer.arrival_date}, {kind}, capacité "
-            f"{offer.capacity_seats} places"
-        )
+        if offer.origin is not None:  # v2 package (I4)
+            lines.append(
+                f"- {offer.offer_id} : {offer.supplier_id}, {offer.origin} → {offer.destination}, "
+                f"{TRIP_TYPE_LABELS[offer.trip_type]}, {kind}, capacité {offer.capacity_seats} "
+                "places"
+            )
+            for title, leg in (("aller", offer.outbound), ("retour", offer.return_leg)):
+                if leg is not None:
+                    leg_kind = "vol direct" if leg.direct else "avec escale"
+                    lines.append(
+                        f"  {title} : départ {leg.departure_date}, arrivée {leg.arrival_date}, "
+                        f"{leg_kind}, vol {leg.leg_ref}, {leg.capacity_seats} places"
+                    )
+        else:
+            lines.append(
+                f"- {offer.offer_id} : {offer.supplier_id}, {offer.destination}, départ "
+                f"{offer.departure_date}, arrivée {offer.arrival_date}, {kind}, capacité "
+                f"{offer.capacity_seats} places"
+            )
         tiers = " ; ".join(
             f"dès {tier.min_seats} place(s) : {euros(tier.list_per_seat_cents)} par place"
             for tier in offer.tiers
@@ -298,6 +365,10 @@ def render_status_text(document: Mapping) -> str:
     status = document["status"]
     if status == "needs_clarification":
         text = "Clarification requise. " + needs_clarification_message(document["missing_fields"])
+    elif status == "unknown_place":  # v2 (I4)
+        text = "Clarification requise. " + unknown_place_message(
+            document["fields"], document["known_places"]
+        )
     elif status == "invalid":
         text = _invalid_text(document["errors"])
     elif status == "request_rejected":

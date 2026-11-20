@@ -17,7 +17,8 @@ from coalition_travel.application.request_understanding import (
     StructuredOutputError,
 )
 
-EXTRACTION_PROMPT_VERSION = "travel-request-extraction-v1"
+# v2 (I4, D-I4-12): the schema gained the route fields, so the prompt is versioned with it.
+EXTRACTION_PROMPT_VERSION = "travel-request-extraction-v2"
 
 
 class LLMProviderError(RequestProviderError):
@@ -116,7 +117,13 @@ class OllamaStructuredRequestExtractor:
             "different needs. Never invent a split; if no distinct groups are stated, leave "
             "profiles empty so the application represents everyone as one group. Profile IDs "
             "must be short unique labels within this request. Put shared constraints on the "
-            "request and only explicit overrides on each profile."
+            "request and only explicit overrides on each profile. "
+            "Copy place names exactly as the user wrote them; never translate or expand them. "
+            "Fill origin and trip_type only when the user states them: round_trip when a return "
+            "is mentioned, one_way when the user says so. departure_after and departure_before "
+            "bound the outbound departure date, return_after and return_before the return "
+            "departure date; an exact date gives a window that starts and ends on that date, and "
+            "a month gives its first and last day."
         )
         user_prompt = (
             f"Reference date: {reference_date.isoformat()}\n"

@@ -44,6 +44,10 @@ def build_profiles(request: TravelRequestDraft) -> tuple[TravelerProfile, ...]:
                 excluded_suppliers=_union_suppliers(
                     request.excluded_suppliers, _field(item, "excluded_suppliers")
                 ),
+                # Route windows (I4): the profile value, otherwise the request value.
+                departure_before=_field(item, "departure_before") or request.departure_before,
+                return_after=_field(item, "return_after") or request.return_after,
+                return_before=_field(item, "return_before") or request.return_before,
             )
         )
     if sum(profile.traveller_count for profile in result) != request.travellers:
@@ -79,6 +83,9 @@ def consolidate_profiles(profiles: Iterable[TravelerProfile]) -> tuple[TravelerP
             arrival_before=existing.arrival_before,
             direct_flight=existing.direct_flight,
             excluded_suppliers=existing.excluded_suppliers,
+            departure_before=existing.departure_before,
+            return_after=existing.return_after,
+            return_before=existing.return_before,
         )
     consolidated = tuple(sorted(merged.values(), key=lambda profile: profile.profile_id))
     if len({profile.profile_id for profile in consolidated}) != len(consolidated):
@@ -102,6 +109,11 @@ def negotiation_profile_key(profile: TravelerProfile) -> str:
             {supplier.casefold() for supplier in profile.excluded_suppliers}
         ),
     }
+    if any(window is not None for window in profile.route_windows):
+        # Route windows enter only when present, so a v1 key is unchanged (I4, B5).
+        key["departure_before"] = _iso(profile.departure_before)
+        key["return_after"] = _iso(profile.return_after)
+        key["return_before"] = _iso(profile.return_before)
     serialized = json.dumps(key, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
@@ -123,6 +135,10 @@ def _union_suppliers(*supplier_lists: Iterable[str] | None) -> tuple[str, ...]:
                 seen.add(folded)
                 union.append(supplier)
     return tuple(union)
+
+
+def _iso(value: date | None) -> str | None:
+    return value.isoformat() if value is not None else None
 
 
 def _field(item, key, default=None):

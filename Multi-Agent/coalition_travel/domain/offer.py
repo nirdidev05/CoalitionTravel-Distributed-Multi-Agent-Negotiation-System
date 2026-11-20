@@ -11,6 +11,7 @@ Every offer is fictional (``synthetic`` must be True): it never represents avail
 a schedule or a commercial commitment.
 """
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from itertools import pairwise
@@ -21,6 +22,8 @@ from coalition_travel.domain.money import MAX_CENTS, Cents, require_cents
 MAX_CAPACITY_SEATS = 10_000
 MAX_IDENTIFIER_LENGTH = 120
 _HEX_DIGITS = frozenset("0123456789abcdef")
+# C5 (plan §6.2): <SUPPLIER>-<NUMBER>-<YYYYMMDD>, never normalized.
+LEG_REF_PATTERN = re.compile(r"[A-Z0-9]{2,12}-[0-9]{1,5}-[0-9]{8}")
 
 
 def _require_identifier(value, name: str) -> None:
@@ -80,6 +83,33 @@ class PriceTier:
 
 
 @dataclass(frozen=True)
+class OfferLeg:
+    """One leg of a v2 package: a fictional flight on a date, with the package's own
+    allotment of seats (hypothesis H-forfait, plan §6.2)."""
+
+    departure_date: date
+    arrival_date: date
+    direct: bool
+    capacity_seats: int
+    leg_ref: str
+
+    def __post_init__(self):
+        for name in ("departure_date", "arrival_date"):
+            value = getattr(self, name)
+            if type(value) is not date or isinstance(value, datetime):
+                raise TypeError(f"leg {name} must be a datetime.date")
+        if self.departure_date > self.arrival_date:
+            raise ValueError("C1: a leg must not arrive before it departs")
+        if type(self.direct) is not bool:
+            raise TypeError("leg direct must be a bool")
+        _require_seat_count(self.capacity_seats, "leg capacity_seats", MAX_CAPACITY_SEATS)
+        if type(self.leg_ref) is not str or not LEG_REF_PATTERN.fullmatch(self.leg_ref):
+            raise ValueError("C5: leg_ref must match <SUPPLIER>-<NUMBER>-<YYYYMMDD>")
+        if self.leg_ref[-8:] != self.departure_date.strftime("%Y%m%d"):
+            raise ValueError("C5: the leg_ref date suffix must equal the departure date")
+
+
+@dataclass(frozen=True)
 class OfferQuote:
     offer_id: str
     catalog_version: str
@@ -91,6 +121,26 @@ class OfferQuote:
     capacity_seats: int
     tiers: tuple[PriceTier, ...]
     synthetic: bool = True
+    # v2 package (I4, plan §6.2): an origin and an outbound leg, plus a return leg for a
+    # round trip. The fields above then describe the outbound leg (D-I4-6).
+    origin: str | None = None
+    outbound: OfferLeg | None = None
+    return_leg: OfferLeg | None = None
+
+    @property
+    def is_route_offer(self) -> bool:
+        return self.origin is not None
+
+    @property
+    def origin_key(self) -> str | None:
+        return None if self.origin is None else normalize_destination_key(self.origin)
+
+    @property
+    def trip_type(self) -> str | None:
+        """Deduced from the return block (plan §6.2), never stored separately."""
+        if self.origin is None:
+            return None
+        return "one_way" if self.return_leg is None else "round_trip"
 
     def __post_init__(self):
         for name in ("offer_id", "catalog_version", "supplier_id", "destination"):
@@ -118,6 +168,7 @@ class OfferQuote:
         # Per-seat prices never increase, so this bounds every total within capacity.
         if self.capacity_seats * self.tiers[0].list_per_seat > MAX_CENTS:
             raise ValueError("offer totals exceed the supported monetary domain")
+        _validate_package(self)
 
     @property
     def destination_key(self) -> str:
@@ -129,6 +180,37 @@ class OfferQuote:
 
     def list_total(self, seats: int) -> Cents:
         return require_cents(seats * self.tier_for(seats).list_per_seat, name="list_total")
+
+
+def _validate_package(offer: OfferQuote) -> None:
+    """C1 to C5 for a v2 package; a v1 offer carries none of the package fields."""
+    if offer.origin is None:
+        if offer.outbound is not None or offer.return_leg is not None:
+            raise ValueError("legs need an origin")
+        return
+    _require_identifier(offer.origin, "origin")
+    normalize_destination_key(offer.origin)
+    for name in ("outbound", "return_leg"):
+        leg = getattr(offer, name)
+        if leg is not None and type(leg) is not OfferLeg:
+            raise TypeError(f"{name} must be an OfferLeg")
+    outbound, back = offer.outbound, offer.return_leg
+    if outbound is None:
+        raise ValueError("a package needs an outbound leg")
+    if (offer.departure_date, offer.arrival_date) != (
+        outbound.departure_date,
+        outbound.arrival_date,
+    ):
+        raise ValueError("the offer dates are the outbound leg dates")
+    legs = (outbound,) if back is None else (outbound, back)
+    if back is not None and not (outbound.arrival_date <= back.departure_date <= back.arrival_date):
+        raise ValueError("C1: the return leg must follow the outbound leg")
+    if offer.capacity_seats != min(leg.capacity_seats for leg in legs):
+        raise ValueError("C2: capacity_seats must be the smallest leg capacity")
+    if offer.direct != all(leg.direct for leg in legs):
+        raise ValueError("C3: direct must hold for every leg")
+    if back is not None and back.leg_ref == outbound.leg_ref:
+        raise ValueError("C6: the outbound and return legs must differ")
 
 
 @dataclass(frozen=True)
@@ -151,6 +233,16 @@ class OfferCatalog:
             raise ValueError("offers must be sorted by offer_id")
         if any(offer.catalog_version != self.version for offer in self.offers):
             raise ValueError("every offer must belong to the catalogue version")
+        if len({offer.is_route_offer for offer in self.offers}) != 1:
+            raise ValueError("a catalogue holds v1 offers only or v2 packages only")
+        references = [
+            leg.leg_ref
+            for offer in self.offers
+            for leg in (offer.outbound, offer.return_leg)
+            if leg is not None
+        ]
+        if len(set(references)) != len(references):
+            raise ValueError("C6: a leg_ref appears at most once in the catalogue")
 
     def get(self, offer_id: str) -> OfferQuote:
         for offer in self.offers:

@@ -32,6 +32,13 @@ class TravelUnit:
     profiles: tuple[TravelerProfile, ...]
     fingerprint: str
     rounded_budget_profiles: tuple[str, ...] = ()
+    # Route of a v2 unit (I4): both set, or both None on the v1 path.
+    origin_key: str | None = None
+    trip_type: str | None = None
+
+    @property
+    def is_route_unit(self) -> bool:
+        return self.origin_key is not None
 
     def __post_init__(self):
         _validate_unit_id(self.unit_id)
@@ -54,6 +61,7 @@ class TravelUnit:
             raise ValueError("total budget exceeds the supported monetary domain")
         _validate_fingerprint(self.fingerprint)
         _validate_rounded_ids(self.rounded_budget_profiles, set(identifiers))
+        _validate_route(self)
 
     @property
     def seats(self) -> int:
@@ -102,7 +110,7 @@ def _validate_profile(profile, destination_key: str) -> None:
         raise TypeError("excluded_suppliers must be a tuple")
     if any(type(supplier) is not str or not supplier for supplier in profile.excluded_suppliers):
         raise TypeError("excluded_suppliers must contain non-empty strings")
-    for value in (profile.departure_after, profile.arrival_before):
+    for value in (profile.departure_after, profile.arrival_before, *profile.route_windows):
         if value is not None and (type(value) is not date or isinstance(value, datetime)):
             raise TypeError("profile dates must be datetime.date values or None")
     if profile.direct_flight not in _DIRECT_FLIGHT_VALUES:
@@ -133,3 +141,28 @@ def _validate_rounded_ids(rounded_ids, profile_ids: set[str]) -> None:
         raise ValueError("rounded_budget_profiles must be sorted and unique")
     if not set(rounded_ids) <= profile_ids:
         raise ValueError("rounded_budget_profiles must reference profiles of the unit")
+
+
+TRIP_TYPES = ("one_way", "round_trip")
+
+
+def _validate_route(unit: "TravelUnit") -> None:
+    """A v2 unit has a normalized origin and a trip type; a v1 unit has neither, and none
+    of its profiles carries a route window (scope review I4, D-I4-1)."""
+    if (unit.origin_key is None) != (unit.trip_type is None):
+        raise ValueError("origin_key and trip_type are set together")
+    if unit.origin_key is None:
+        if any(window is not None for p in unit.profiles for window in p.route_windows):
+            raise ValueError("a unit without route cannot carry route windows")
+        return
+    if type(unit.origin_key) is not str:
+        raise TypeError("origin_key must be a string")
+    if normalize_destination_key(unit.origin_key) != unit.origin_key:
+        raise ValueError("origin_key must already be normalized")
+    if unit.trip_type not in TRIP_TYPES:
+        raise ValueError("trip_type must be one_way or round_trip")
+    if unit.trip_type == "one_way" and any(
+        profile.return_after is not None or profile.return_before is not None
+        for profile in unit.profiles
+    ):
+        raise ValueError("a one-way unit cannot carry a return window")

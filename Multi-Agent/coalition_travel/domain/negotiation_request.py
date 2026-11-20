@@ -44,6 +44,9 @@ from coalition_travel.domain.travel_unit import TravelUnit
 _CREATION_TOKEN = object()
 # Version of the canonical document; change it whenever its content or layout changes.
 REQUEST_KEY_SCHEMA = "negotiation-request-key-v2"
+# v3 (plan §6.4, ID-4): the same document plus the route fields, produced exactly when a
+# unit or the offer carries a route. Without route, the v2 document is unchanged (K1).
+REQUEST_KEY_SCHEMA_V3 = "negotiation-request-key-v3"
 
 # Three distinct terminal outcomes of the legacy alternating-offers protocol:
 # ACCEPT message, REJECT message, or the max_turns limit reached without a terminal message.
@@ -96,6 +99,8 @@ def negotiation_request_for(
                 f"unit {unit.unit_id!r} travels to {unit.destination_key!r}, "
                 f"not to the offer destination {offer.destination_key!r}"
             )
+        if (unit.origin_key, unit.trip_type) != (offer.origin_key, offer.trip_type):
+            raise ValueError(f"unit {unit.unit_id!r} does not travel on the offer route (I4)")
     seats = sum(unit.seats for unit in ordered)
     if seats > offer.capacity_seats:
         raise ValueError("negotiation request exceeds offer capacity")
@@ -110,8 +115,9 @@ def negotiation_request_for(
 def request_key_content(units: tuple[TravelUnit, ...], offer: OfferQuote) -> dict:
     """Canonical economic document hashed into ``request_key`` (see module docstring)."""
     unit_documents = sorted((unit_economic_content(unit) for unit in units), key=_canonical_json)
+    route = offer.is_route_offer or any(unit.is_route_unit for unit in units)
     return {
-        "schema": REQUEST_KEY_SCHEMA,
+        "schema": REQUEST_KEY_SCHEMA_V3 if route else REQUEST_KEY_SCHEMA,
         "offer": offer_economic_content(offer),
         "units": unit_documents,
         "seats": sum(unit.seats for unit in units),
@@ -133,6 +139,10 @@ def unit_economic_content(unit: TravelUnit) -> dict:
                 {normalize_supplier_key(supplier) for supplier in profile.excluded_suppliers}
             ),
         }
+        if unit.is_route_unit:  # effective windows, after inheritance (K5)
+            constraints["departure_before"] = _iso(profile.departure_before)
+            constraints["return_after"] = _iso(profile.return_after)
+            constraints["return_before"] = _iso(profile.return_before)
         signature = _canonical_json(constraints)
         constraints_by_signature[signature] = constraints
         seats_by_constraints[signature] = (
@@ -142,10 +152,14 @@ def unit_economic_content(unit: TravelUnit) -> dict:
         {**constraints_by_signature[signature], "seats": seats_by_constraints[signature]}
         for signature in sorted(constraints_by_signature)
     ]
-    return {
+    document = {
         "destination_key": normalize_destination_key(unit.destination_key),
         "profiles": profiles,
     }
+    if unit.is_route_unit:
+        document["origin_key"] = normalize_destination_key(unit.origin_key)
+        document["trip_type"] = unit.trip_type
+    return document
 
 
 def unit_economic_digest(unit: TravelUnit) -> str:
@@ -155,7 +169,7 @@ def unit_economic_digest(unit: TravelUnit) -> str:
 
 def offer_economic_content(offer: OfferQuote) -> dict:
     """Public offer fields that identify what is negotiated (private terms excluded)."""
-    return {
+    document = {
         "offer_id": offer.offer_id,
         "catalog_version": offer.catalog_version,
         "supplier_id": offer.supplier_id,
@@ -165,6 +179,21 @@ def offer_economic_content(offer: OfferQuote) -> dict:
         "direct": offer.direct,
         "capacity_seats": offer.capacity_seats,
         "price_tiers": [[tier.min_seats, tier.list_per_seat] for tier in offer.tiers],
+    }
+    if offer.is_route_offer:  # every public field of a package enters the key (plan §6.4)
+        document["origin_key"] = offer.origin_key
+        document["outbound"] = _leg_content(offer.outbound)
+        document["return"] = None if offer.return_leg is None else _leg_content(offer.return_leg)
+    return document
+
+
+def _leg_content(leg) -> dict:
+    return {
+        "departure_date": leg.departure_date.isoformat(),
+        "arrival_date": leg.arrival_date.isoformat(),
+        "direct": leg.direct,
+        "capacity_seats": leg.capacity_seats,
+        "leg_ref": leg.leg_ref,
     }
 
 

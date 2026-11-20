@@ -255,8 +255,11 @@ class TripPlan:
 
 
 def route_key(unit: TravelUnit) -> str:
-    """Route of a unit for lot selection. v1: destination key (I4 adds origin and type)."""
-    return unit.destination_key
+    """Route of a unit for lot selection. v1: the destination key, unchanged. A route unit
+    (I4) adds its origin and trip type, so a lot never mixes two routes."""
+    if not unit.is_route_unit:
+        return unit.destination_key
+    return f"{unit.origin_key}>{unit.destination_key}|{unit.trip_type}"
 
 
 def verify_journal_invariants(

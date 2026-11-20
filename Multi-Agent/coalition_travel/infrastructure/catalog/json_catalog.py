@@ -18,6 +18,7 @@ from pathlib import Path
 
 from coalition_travel.domain.offer import (
     OfferCatalog,
+    OfferLeg,
     OfferQuote,
     PriceTier,
     SellerFloorTier,
@@ -53,6 +54,15 @@ MANIFEST_KEYS = frozenset(
     }
 )
 SUPPORTED_CURRENCY = "EUR"
+# Catalogue v2 (plan §6.2, I4): round-trip packages. A file is v2 exactly when it has the
+# top-level key "format"; a v1 file is read by the v1 parser, unchanged.
+CATALOG_V2_FORMAT = "offer-catalog-v2"
+CATALOG_V2_KEYS = frozenset({"format", "catalog_version", "currency", "synthetic", "offers"})
+OFFER_V2_KEYS = frozenset(
+    {"offer_id", "supplier_id", "origin", "destination", "outbound", "capacity_seats", "tiers"}
+)
+OFFER_V2_OPTIONAL_KEYS = frozenset({"return"})
+LEG_KEYS = frozenset({"departure_date", "arrival_date", "direct", "capacity_seats", "leg_ref"})
 _DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 
@@ -73,7 +83,10 @@ def load_offer_catalog(path: str | Path) -> tuple[OfferCatalog, SellerTermsBook]
         raise CatalogValidationError(f"missing catalogue manifest: {manifest_path}")
     manifest = _strict_json(_read_bytes(manifest_path), str(manifest_path))
 
-    version, offers, terms = _parse_catalog(document, str(catalog_path))
+    if isinstance(document, dict) and "format" in document:  # package catalogue (I4)
+        version, offers, terms = _parse_catalog_v2(document, str(catalog_path))
+    else:
+        version, offers, terms = _parse_catalog(document, str(catalog_path))
     _check_manifest(manifest, str(manifest_path), catalog_path.name, sha256, version, len(offers))
 
     try:
@@ -213,6 +226,100 @@ def _parse_catalog(document, origin: str):
                     direct=_boolean(item["direct"], f"{location}.direct"),
                     capacity_seats=capacity,
                     tiers=tuple(PriceTier(seats, price) for seats, price in price_tiers),
+                )
+            )
+            terms.append(
+                SellerTerms(
+                    offer_id=offer_id,
+                    catalog_version=version,
+                    capacity_seats=capacity,
+                    floor_tiers=tuple(
+                        SellerFloorTier(seats, floor) for seats, floor in floor_tiers
+                    ),
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            if isinstance(exc, CatalogValidationError):
+                raise
+            raise CatalogValidationError(f"{location}: {exc}") from exc
+    return version, offers, terms
+
+
+def _tiers(raw_tiers, location):
+    if type(raw_tiers) is not list or not raw_tiers:
+        raise CatalogValidationError(f"{location}.tiers: expected a non-empty list")
+    price_tiers, floor_tiers = [], []
+    for tier_index, raw_tier in enumerate(raw_tiers):
+        tier_location = f"{location}.tiers[{tier_index}]"
+        tier = _object(raw_tier, TIER_KEYS, tier_location)
+        seats = _integer(tier["min_seats"], f"{tier_location}.min_seats")
+        list_price = _integer(tier["list_per_seat_cents"], f"{tier_location}.list")
+        floor = _integer(tier["seller_floor_per_seat_cents"], f"{tier_location}.floor")
+        price_tiers.append((seats, list_price))
+        floor_tiers.append((seats, floor))
+    return price_tiers, floor_tiers
+
+
+def _leg(value, location) -> OfferLeg:
+    """A complete leg; a partial block is refused (plan §6.2)."""
+    item = _object(value, LEG_KEYS, location)
+    return OfferLeg(
+        departure_date=_iso_date(item["departure_date"], f"{location}.departure_date"),
+        arrival_date=_iso_date(item["arrival_date"], f"{location}.arrival_date"),
+        direct=_boolean(item["direct"], f"{location}.direct"),
+        capacity_seats=_integer(item["capacity_seats"], f"{location}.capacity_seats"),
+        leg_ref=_string(item["leg_ref"], f"{location}.leg_ref"),
+    )
+
+
+def _parse_catalog_v2(document, origin: str):
+    """Packages: C1 to C5 are checked by OfferQuote, C6 by OfferCatalog. The reader computes
+    ``direct`` (C3) and refuses a declared capacity that differs from C2, never fixing it."""
+    root = _object(document, CATALOG_V2_KEYS, origin)
+    if root["format"] != CATALOG_V2_FORMAT:
+        raise CatalogValidationError(f"{origin}.format: only {CATALOG_V2_FORMAT} is supported")
+    version = _string(root["catalog_version"], f"{origin}.catalog_version")
+    if root["currency"] != SUPPORTED_CURRENCY:
+        raise CatalogValidationError(f"{origin}.currency: only {SUPPORTED_CURRENCY} is supported")
+    if root["synthetic"] is not True:
+        raise CatalogValidationError(f"{origin}.synthetic: the catalogue must be synthetic")
+    raw_offers = root["offers"]
+    if type(raw_offers) is not list or not raw_offers:
+        raise CatalogValidationError(f"{origin}.offers: expected a non-empty list")
+    offers, terms = [], []
+    for index, raw_offer in enumerate(raw_offers):
+        location = f"{origin}.offers[{index}]"
+        if not isinstance(raw_offer, dict):
+            raise CatalogValidationError(f"{location}: expected an object")
+        keys = set(raw_offer)
+        missing = sorted(OFFER_V2_KEYS - keys)
+        unknown = sorted(keys - OFFER_V2_KEYS - OFFER_V2_OPTIONAL_KEYS)
+        if missing or unknown:
+            raise CatalogValidationError(f"{location}: missing {missing}, unknown {unknown}")
+        offer_id = _string(raw_offer["offer_id"], f"{location}.offer_id")
+        location = f"{location} ({offer_id})"
+        price_tiers, floor_tiers = _tiers(raw_offer["tiers"], location)
+        capacity = _integer(raw_offer["capacity_seats"], f"{location}.capacity_seats")
+        try:
+            outbound = _leg(raw_offer["outbound"], f"{location}.outbound")
+            back = (
+                _leg(raw_offer["return"], f"{location}.return") if "return" in raw_offer else None
+            )
+            legs = (outbound,) if back is None else (outbound, back)
+            offers.append(
+                OfferQuote(
+                    offer_id=offer_id,
+                    catalog_version=version,
+                    supplier_id=_string(raw_offer["supplier_id"], f"{location}.supplier_id"),
+                    destination=_string(raw_offer["destination"], f"{location}.destination"),
+                    departure_date=outbound.departure_date,
+                    arrival_date=outbound.arrival_date,
+                    direct=all(leg.direct for leg in legs),
+                    capacity_seats=capacity,
+                    tiers=tuple(PriceTier(seats, price) for seats, price in price_tiers),
+                    origin=_string(raw_offer["origin"], f"{location}.origin"),
+                    outbound=outbound,
+                    return_leg=back,
                 )
             )
             terms.append(

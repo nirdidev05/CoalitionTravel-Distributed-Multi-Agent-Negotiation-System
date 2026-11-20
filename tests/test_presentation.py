@@ -615,7 +615,7 @@ def test_status_documents_negative_cases():
         base | {"extra": 1},
         {key: value for key, value in base.items() if key != "errors"},
         base | {"errors": None},
-        base | {"schema": "trip-request-status-v2"},
+        base | {"schema": "trip-request-status-v9"},  # I4: v2 now exists
         base | {"source": "file"},
         base | {"reference_date": "19/11/2026"},
         invalid_document(source="llm", reference_date=REFERENCE, errors=["something went wrong"]),

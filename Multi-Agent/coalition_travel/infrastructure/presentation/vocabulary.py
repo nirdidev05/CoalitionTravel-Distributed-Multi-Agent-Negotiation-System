@@ -55,6 +55,8 @@ def user_strings(draft: TravelRequestDraft) -> Iterator[tuple[str, str]]:
     """(path, value) of every free string supplied by the person (D-I3-17)."""
     if draft.destination is not None:
         yield "destination", draft.destination
+    if draft.origin is not None:  # route requests (I4)
+        yield "origin", draft.origin
     for index, supplier in enumerate(draft.excluded_suppliers):
         yield f"excluded_suppliers[{index}]", supplier
     for index, profile in enumerate(draft.profiles):
